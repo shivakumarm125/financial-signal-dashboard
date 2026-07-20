@@ -132,8 +132,9 @@ Tag legend: **BA** · **BE** (Backend Dev) · **FE** (Frontend Dev) · **UX** (U
 
 ## Epic D — Scheduling & Notifications `[BE]`
 
-**D1. Cloud cron/serverless job orchestration** — P0
+**D1. Cloud cron/serverless job orchestration** — P0 — ✅ **Built**, verified against real data
 - AC: Serverless scheduled job triggers the ingestion→analysis pipeline per user watchlist at their configured cadence (daily/weekly).
+- Implemented as a GitHub Actions scheduled workflow (`.github/workflows/daily-signals.yml`) running `apps/api/src/scripts/run-all.ts` — not a serverless function, deliberately: the ingestion pipeline's built-in rate-limit delays (Twelve Data 8s/call, Finnhub 1.1s/call) can exceed typical serverless timeouts for more than a handful of tickers. Runs against every currently-tracked `Ticker` row — no per-user watchlist to scope to yet (Epic E not built), same placeholder pattern as C2/C4. **Known gap, deferred to D2:** fires at a fixed UTC cron time with no DST adjustment for US Eastern. Repo pushed to a new private GitHub repo (`shivakumarm125/financial-signal-dashboard`); secrets set via `gh secret set`. Verified with 3 real triggered runs — first two failed on real CI issues (a Windows-only dependency breaking Linux `npm install`; `packages/shared`'s `dist/` never being built in CI) and were fixed; the third completed successfully end-to-end (all 3 ingestion sources + a real Claude call), confirmed by a new `SignalRecord` landing in the DB at the exact run timestamp.
 
 **D2. Per-user schedule preferences** — P0
 - AC: User can set cadence (daily/weekly), time of day, and timezone; stored and respected by D1.
