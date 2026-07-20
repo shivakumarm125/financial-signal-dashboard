@@ -27,8 +27,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Generate Prisma client
-        run: npx prisma generate --schema=packages/shared/prisma/schema.prisma
+      - name: Build packages/shared (Prisma client + compiled dist/)
+        run: npm run build --workspace=@financial-adviser/shared
 
       - name: Run ingestion + signal generation for all tracked tickers
         working-directory: apps/api
