@@ -1,0 +1,11 @@
+{
+  "name": "financial-signal-dashboard",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "ingest:filings": "npm run ingest:filings --workspace=@financial-adviser/api"
+  }
+}

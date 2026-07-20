@@ -1,0 +1,41 @@
+name: Daily signal generation
+
+# D1: cloud cron for the ingestion -> analysis pipeline. Runs as a normal
+# process on a GitHub-hosted runner (not a serverless function) specifically
+# because the ingestion pipeline has deliberate rate-limit delays baked in
+# (Twelve Data: 8s/call, Finnhub: 1.1s/call) that can exceed typical
+# serverless function timeouts for more than a handful of tickers.
+#
+# Known gap (deferred to D2, not yet built): this fires at a fixed UTC time,
+# which does not auto-adjust for US Eastern DST -- "9am ET" drifts by an hour
+# twice a year until D2's real per-user timezone handling exists.
+on:
+  schedule:
+    - cron: "0 13 * * 1-5" # ~9am US Eastern on weekdays, DST not accounted for (see note above)
+  workflow_dispatch: {} # manual trigger, e.g. for testing this workflow itself
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=packages/shared/prisma/schema.prisma
+
+      - name: Run ingestion + signal generation for all tracked tickers
+        working-directory: apps/api
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: npx tsx src/scripts/run-all.ts

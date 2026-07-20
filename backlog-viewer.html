@@ -1,0 +1,476 @@
+<title>Financial Signal Dashboard — Backlog</title>
+<style>
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #E8EAE4; --ink-soft: #A7ADA2; --paper: #14181A; --surface: #1C2124;
+      --surface-hover: #222829; --line: #2C3336; --accent: #6cc7ba; --accent-soft: #1E3230;
+      --p0: #E08A73; --p0-bg: #3A211C; --p1: #D9B872; --p1-bg: #3A3121; --p2: #9AA0A6; --p2-bg: #262A26;
+      --st-open: #9AA0A6; --st-open-bg: #23282A; --st-progress: #7FB0E8; --st-progress-bg: #1E2E3D; --st-done: #7FC48A; --st-done-bg: #1E3324;
+      --shadow: 0 1px 2px rgba(0,0,0,.4);
+    }
+  }
+  :root {
+    --ink: #1B2229; --ink-soft: #5B6570; --paper: #ECEEE7; --surface: #FBFBF8;
+    --surface-hover: #F3F4EE; --line: #DBDFD4; --accent: #1F5C57; --accent-soft: #E4EEEC;
+    --p0: #A8402A; --p0-bg: #F7E7E2; --p1: #A67C2E; --p1-bg: #F5EBD6; --p2: #6B7280; --p2-bg: #EDEEEA;
+    --st-open: #6B7280; --st-open-bg: #E6E8E1; --st-progress: #3B6FB4; --st-progress-bg: #E1EAF6; --st-done: #3F7D4F; --st-done-bg: #E1EEE3;
+    --shadow: 0 1px 2px rgba(20,30,25,.06);
+  }
+  :root[data-theme="dark"] {
+    --ink: #E8EAE4; --ink-soft: #A7ADA2; --paper: #14181A; --surface: #1C2124;
+    --surface-hover: #222829; --line: #2C3336; --accent: #6cc7ba; --accent-soft: #1E3230;
+    --p0: #E08A73; --p0-bg: #3A211C; --p1: #D9B872; --p1-bg: #3A3121; --p2: #9AA0A6; --p2-bg: #262A26;
+    --st-open: #9AA0A6; --st-open-bg: #23282A; --st-progress: #7FB0E8; --st-progress-bg: #1E2E3D; --st-done: #7FC48A; --st-done-bg: #1E3324;
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+  :root[data-theme="light"] {
+    --ink: #1B2229; --ink-soft: #5B6570; --paper: #ECEEE7; --surface: #FBFBF8;
+    --surface-hover: #F3F4EE; --line: #DBDFD4; --accent: #1F5C57; --accent-soft: #E4EEEC;
+    --p0: #A8402A; --p0-bg: #F7E7E2; --p1: #A67C2E; --p1-bg: #F5EBD6; --p2: #6B7280; --p2-bg: #EDEEEA;
+    --st-open: #6B7280; --st-open-bg: #E6E8E1; --st-progress: #3B6FB4; --st-progress-bg: #E1EAF6; --st-done: #3F7D4F; --st-done-bg: #E1EEE3;
+    --shadow: 0 1px 2px rgba(20,30,25,.06);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px; line-height: 1.55;
+  }
+  ::selection { background: var(--accent-soft); }
+  a { color: var(--accent); }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px 96px; }
+
+  header.top {
+    padding: 56px 0 28px; border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+  }
+  h1 {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: clamp(28px, 4vw, 38px); font-weight: 400; margin: 0 0 12px;
+    text-wrap: balance; letter-spacing: -.01em;
+  }
+  .dek { color: var(--ink-soft); max-width: 62ch; margin: 0 0 24px; font-size: 15.5px; }
+
+  .spec-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+  .spec {
+    font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line);
+    border-radius: 3px; color: var(--ink-soft); background: var(--surface);
+  }
+  .spec b { color: var(--ink); font-weight: 600; }
+
+  section.summary {
+    padding: 28px 0; border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+  }
+  @media (max-width: 760px) { section.summary { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 480px) { section.summary { grid-template-columns: 1fr; } }
+
+  .summary h2, .filters h2 {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 600; margin: 0 0 12px;
+  }
+  .tag-bars { display: flex; flex-direction: column; gap: 7px; }
+  .tag-bar-row { display: grid; grid-template-columns: 46px 1fr 26px; align-items: center; gap: 10px; }
+  .tag-bar-label {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px;
+    font-weight: 600; color: var(--ink);
+  }
+  .tag-bar-track { height: 7px; background: var(--surface-hover); border-radius: 4px; overflow: hidden; }
+  .tag-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+  .tag-bar-count {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px;
+    color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums;
+  }
+
+  .stat-rows { display: flex; flex-direction: column; gap: 10px; }
+  .stat-row { display: flex; align-items: baseline; gap: 10px; }
+  .stat-row .chip { flex-shrink: 0; }
+  .stat-row .label { font-size: 13px; color: var(--ink-soft); }
+  .stat-row .n {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin-left: auto;
+    font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+
+  .chip {
+    display: inline-flex; align-items: center; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.p0 { color: var(--p0); background: var(--p0-bg); }
+  .chip.p1 { color: var(--p1); background: var(--p1-bg); }
+  .chip.p2 { color: var(--p2); background: var(--p2-bg); }
+  .chip.tag { color: var(--accent); background: var(--accent-soft); }
+  .chip.status-open { color: var(--st-open); background: var(--st-open-bg); }
+  .chip.status-progress { color: var(--st-progress); background: var(--st-progress-bg); }
+  .chip.status-done { color: var(--st-done); background: var(--st-done-bg); }
+  .chip.status-done::before { content: "✓ "; }
+  .chip.status-progress::before { content: "◐ "; }
+  .chip.status-open::before { content: "○ "; }
+
+  .filters { padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .filter-group { margin-bottom: 10px; }
+  .filter-group:last-child { margin-bottom: 0; }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .filter-group-label {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10.5px;
+    color: var(--ink-soft); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px;
+  }
+  button.f {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+    padding: 6px 12px; border-radius: 999px; cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+  }
+  button.f:hover { border-color: var(--accent); color: var(--ink); }
+  button.f.active { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+  button.f:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .filter-note { font-size: 12px; color: var(--ink-soft); margin-top: 12px; }
+
+  .epic { padding: 40px 0 8px; border-bottom: 1px solid var(--line); }
+  .epic:last-of-type { border-bottom: none; }
+  .epic-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+  .epic-key {
+    font-family: Georgia, serif; font-size: 15px; color: var(--accent); font-style: italic;
+  }
+  .epic-name {
+    font-family: Georgia, "Iowan Old Style", serif; font-size: 21px; font-weight: 400; margin: 0;
+  }
+  .epic-count { font-size: 12.5px; color: var(--ink-soft); margin-left: auto; }
+  .epic-note { font-size: 13px; color: var(--ink-soft); max-width: 66ch; margin: 0 0 14px; }
+
+  .ticket {
+    border-top: 1px solid var(--line); padding: 14px 0;
+  }
+  .ticket summary {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+    cursor: pointer; list-style: none; padding: 4px 0;
+  }
+  .ticket summary::-webkit-details-marker { display: none; }
+  .ticket summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  .t-id {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px;
+    color: var(--ink-soft); font-variant-numeric: tabular-nums; flex: 0 0 auto;
+  }
+  .t-title { font-size: 14.5px; color: var(--ink); flex: 1 1 220px; }
+  .t-caret {
+    color: var(--ink-soft); font-size: 11px; transition: transform .15s ease;
+    flex: 0 0 auto; margin-left: auto;
+  }
+  details[open] .t-caret { transform: rotate(90deg); }
+  .t-desc-line {
+    flex-basis: 100%; color: var(--ink-soft); font-size: 13.5px; max-width: 66ch;
+    padding-left: 58px; margin-top: 1px;
+  }
+  .t-body { padding: 10px 0 4px 58px; }
+  .t-ac { margin: 0; padding-left: 18px; font-size: 13.5px; }
+  .t-ac li { margin-bottom: 4px; }
+  .t-ac li::marker { color: var(--accent); }
+
+  .ticket.hidden { display: none; }
+  .epic.hidden { display: none; }
+
+  .compliance {
+    margin: 32px 0 0; padding: 16px 18px; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    background: var(--surface); border-radius: 0 4px 4px 0; font-size: 13.5px; color: var(--ink-soft);
+  }
+  .compliance b { color: var(--ink); }
+
+  footer.sequence { padding: 44px 0 0; }
+  footer.sequence h2 {
+    font-family: Georgia, serif; font-weight: 400; font-size: 20px; margin: 0 0 16px;
+  }
+  ol.seq { padding-left: 22px; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  ol.seq li { font-size: 14px; padding-left: 4px; }
+  ol.seq b { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; color: var(--accent); }
+  .fine { color: var(--ink-soft); font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">Product backlog — v1 intake</p>
+    <h1>Financial Signal Dashboard</h1>
+    <p class="dek">A research/signal tool, not a trading tool: it ingests price history, news, public insider filings, and social speculation, then asks Claude to produce a dated, cited signal per ticker on a schedule the user sets.</p>
+    <div class="spec-strip">
+      <span class="spec"><b>No trade execution</b> — dashboard only</span>
+      <span class="spec"><b>BYO Claude key</b> — per user</span>
+      <span class="spec"><b>Next.js</b> + <b>Node.js</b> + <b>Postgres</b></span>
+      <span class="spec">US equities, 4 data sources</span>
+      <span class="spec"><b>~10 users</b> — friends and family, no public launch</span>
+    </div>
+  </header>
+
+  <section class="summary">
+    <div>
+      <h2>Tickets by role</h2>
+      <div class="tag-bars" id="tagBars"></div>
+    </div>
+    <div>
+      <h2>Tickets by priority</h2>
+      <div class="stat-rows" id="prioRows"></div>
+    </div>
+    <div>
+      <h2>Tickets by status</h2>
+      <div class="stat-rows" id="statusRows"></div>
+    </div>
+  </section>
+
+  <section class="filters">
+    <h2>Filter</h2>
+    <div class="filter-group">
+      <div class="filter-row" id="filterRowTag"></div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-row" id="filterRowMeta"></div>
+    </div>
+    <p class="filter-note" id="filterNote"></p>
+  </section>
+
+  <div id="epics"></div>
+
+  <div class="compliance">
+    <b>Compliance note:</b> "insider trading" data means public filings only — SEC Form 4 (US). Social/forum data is stored and shown as unverified speculation, never presented as fact.
+  </div>
+
+  <footer class="sequence">
+    <h2>Suggested build sequence</h2>
+    <ol class="seq" id="seqList"></ol>
+  </footer>
+
+  <p class="fine">44 tickets · 10 epics (Epic J cut to zero tickets — no public launch at friends-and-family scale) · generated from intake on 2026-07-18, last updated 2026-07-18. Full detail with acceptance criteria also lives in <code>TICKETS.md</code>; A1 scope doc in <code>docs/A1-mvp-scope.md</code>.</p>
+</div>
+
+<script>
+const TAGS = ["BA","BE","FE","UX","QA","UXT"];
+const STATUSES = [["open","Open","○"],["progress","In progress","◐"],["done","Done","✓"]];
+
+// ticket tuple shape: [id, tag, priority, status, title, desc, acceptanceCriteria[]]
+const epics = [
+  {key:"A", name:"Discovery, Architecture & Compliance", tickets:[
+    ["A1","BA","P0","done","Define MVP scope & non-goals document","Locks the MVP cut — markets, data sources, BYO-key model, pricing, and the “signal not prediction” language — into one doc everyone builds against.",["One-page doc listing in-scope/out-of-scope items, reviewed and approved before Epic B/C kick off."]],
+    ["A2","BA","P0","done","Data-source vendor evaluation & selection","Picks the actual providers behind each of the 4 data sources — Alpha Vantage/Twelve Data, EDGAR direct, Finnhub, Reddit API.",["Vendor comparison (cost, rate limits, data quality, ToS) with a recommendation per category; final picks documented in A1."]],
+    ["A3","BA","P0","done","Lightweight disclaimer & data-use notice","Plain-language “not advice” notice plus a short data-source/assumptions paragraph — no formal ToS/Privacy Policy needed at ~10-user friends-and-family scale.",["Disclaimer text shown at signup and on every signal card.","One short paragraph covering source attribution and tracked assumptions (e.g. Reddit non-commercial-use)."]],
+    ["A4","BA","P0","done","Define BYO Claude-API-key model","Specs exactly how a user's own Claude key is collected, validated, stored, used, and recovered from when it breaks.",["Flow diagram covering key lifecycle plus user-facing cost/usage disclosure copy."]],
+    ["A5","BA","P0","done","Signal methodology spec","Defines precisely what Claude is asked to produce and how the 4 data sources get weighted into one confidence score — the brief Epic C is built from.",["Spec document that Epic C is built directly against, including example input/output pairs."]],
+    ["A6","BA","P1","done","Journey map (no formal personas)","Grounds onboarding in the real ~10 known users instead of invented composite personas — they're reachable directly, not a hypothetical audience.",["Primary end-to-end journey map from signup to acting on a signal; formal persona deliverable skipped at this scale."]],
+    ["A7","BA","P1","done","Success check (no formal instrumentation)","Decides what “working” means using data the product already stores, plus direct check-ins — no analytics pipeline built for 10 people.",["Watchlist size, accuracy history, job success rate, and retention proxy read from existing B5/C5/D4/E1 data; view rate and felt usefulness answered via I1 check-ins."]],
+    ["A8","BA","P0","done","Public-data sanity check","Confirms every ingested source is genuinely public — no non-public/insider channels — and social chatter is never dressed up as fact.",["One paragraph in A3 confirming public-only status per source; no formal sign-off checklist needed at this scale."]]
+  ]},
+  {key:"B", name:"Data Ingestion Pipeline", tickets:[
+    ["B1","BE","P0","done","SEC EDGAR Form 4 ingestion service","Pulls US insider-filing disclosures per ticker on schedule. Built and verified against live EDGAR + Supabase (AAPL: 590 filings, 1028 transactions).",["Stores structured records (insider name/role, transaction type, shares, date); handles EDGAR rate limits."]],
+    ["B2","BE","P0","done","Market price/chart data ingestion service","Pulls OHLCV history and basic technicals per ticker via Twelve Data. Built and verified (AAPL: 251 daily bars, correct MA/volume-trend output, 1 API call spent).",["Moving averages and volume trend computed; backfills history on first watchlist add."]],
+    ["B3","BE","P0","done","Financial news ingestion service","Pulls recent articles per ticker/company via Finnhub (NewsAPI fallback dropped, its rationale was India coverage). Built and verified (AAPL: 246 articles, zero duplicates).",["Source, timestamp, headline, summary stored; dedupes across runs."]],
+    ["B4","BE","P1","open","Social/forum speculation ingestion service","Pulls forum/social mentions per ticker as the fourth, most speculative signal, kept clearly separate from filings and news.",["Each item tagged with a source-credibility score and explicitly flagged “unverified sentiment” in schema."]],
+    ["B5","BE","P0","open","Data normalization & storage schema","The one schema all four sources write into, so the analysis engine reads one consistent shape.",["Postgres schema for tickers, watchlists, price history, news, filings, social items, with indexes sized for per-user watchlist queries."]],
+    ["B6","BE","P1","open","Per-ticker data freshness/staleness monitoring","Flags when a source has gone quiet before the user finds out the hard way.",["Each record has a freshness timestamp; stale-data flag surfaces if a source misses its expected cadence."]],
+    ["B7","BE","P0","open","Rate-limit & quota handling per provider","Keeps a scheduled run from silently losing data when a provider throttles it.",["Each ingestion service backs off/queues on 429s, logs quota usage, and never silently drops a run."]],
+    ["B8","BE","P1","open","Historical data backfill job","Gives a newly-watchlisted ticker real context on day one instead of an empty history.",["One-time job pulls N months of price/news/filings history when a ticker is first watchlisted."]]
+  ]},
+  {key:"C", name:"Claude Analysis Engine", tickets:[
+    ["C1","BE","P0","done","Prompt/context assembly service","Turns the 3 built feeds (social/B4 not yet built) into one coherent, size-bounded brief for Claude to reason over. Built and verified against real AAPL data.",["Combines latest price/news/filings/social data per ticker into a structured prompt per the A5 spec."]],
+    ["C2","BE","P0","done","Claude API integration layer (BYO key)","The load-bearing piece of the BYO-key model — calls Claude Sonnet 5 via the official SDK with structured outputs. Built and verified against real AAPL data.",["Retrieves the user's stored key securely at run time; handles auth/rate-limit/timeout errors distinctly from data errors."]],
+    ["C3","BE","P0","done","Signal output schema","Forces Claude's free-form reasoning into a structured shape the UI can render reliably every time. Built and verified: real AAPL run saw a disagreeing pre-tag correctly cap confidence 58%→50%.",["Structured output enforced (direction, confidence 0-100, rationale, cited source items); malformed output triggers a retry, not a silent failure."]],
+    ["C4","BE","P1","done","Per-user cost/usage guardrails","Protects a user from an unexpectedly large Anthropic bill from their own key. Built and verified — real call cost $0.011, correctly recorded and used for future estimates.",["Token/cost estimate shown before enabling a schedule; user-configurable soft cap with a warning notification."]],
+    ["C5","BE","P1","open","Signal history & accuracy tracking","The receipts — stores past signals and checks them against what actually happened.",["Each signal stored and compared against actual price movement at a defined horizon (e.g. +7 days), surfaced as a track record."]],
+    ["C6","BE","P0","done","Retry/fallback handling for Claude API failures","Tells transient hiccups apart from real, user-facing problems like a revoked key. Built and verified with a real invalid-key test (zero cost — a 401 skips the retry wait correctly).",["Transient errors retry with backoff; persistent failures (bad/revoked key) notify the user with an actionable message."]]
+  ]},
+  {key:"D", name:"Scheduling & Notifications", tickets:[
+    ["D1","BE","P0","open","Cloud cron/serverless job orchestration","The engine that makes “every morning” or “every week” an actual, running thing.",["Scheduled job triggers ingestion → analysis per user watchlist at their configured cadence."]],
+    ["D2","BE","P0","open","Per-user schedule preferences","Lets daily-vs-weekly, time of day, and timezone be a per-user choice, not a global default.",["User can set cadence, time of day, and timezone; stored and respected by D1."]],
+    ["D3","BE","P1","open","Email/in-app notification on new results","Closes the loop after a scheduled run so the user doesn't have to remember to check.",["User notified when a run completes with new signals, linking directly to results."]],
+    ["D4","BE","P0","open","Job monitoring & failure alerting","Makes a failed run visible instead of a silent gap in the user's history.",["Failed/skipped runs logged and retried once automatically; repeated failure surfaces to user and an internal ops alert."]]
+  ]},
+  {key:"E", name:"Auth, Accounts & API-Key Management", tickets:[
+    ["E1","BE","P0","open","User signup/login","The standard account foundation everything else sits on.",["Email/password or OAuth auth, session handling, password reset flow."]],
+    ["E2","BE","P0","open","Secure Claude API-key storage","The single highest-trust piece of data in the system — a user's own Anthropic credential.",["Keys encrypted at rest (envelope encryption); never logged; never returned to the client after initial save."]],
+    ["E3","FE","P0","open","API-key management UI","Where a user's trust in the BYO-key model is won or lost at first use.",["User can add/replace/remove their Claude key; a “validate key” action confirms it works before enabling schedules."]],
+    ["E4","FE","P1","open","Account settings page","One place for the handful of controls a returning user actually touches.",["Single page to manage watchlist, schedule cadence/timezone, and notification preferences."]]
+  ]},
+  {key:"F", name:"Dashboard UI", tickets:[
+    ["F1","FE","P0","open","Watchlist management screen","The home base of the product — every session starts here.",["Add/remove tickers; see at-a-glance last-run status per ticker."]],
+    ["F2","FE","P0","open","Signal card component","The single most-viewed piece of UI in the whole product.",["Shows direction, confidence, rationale, cited sources, and disclaimer text (A3); collapsible detail view."]],
+    ["F3","FE","P1","open","Historical signal accuracy view","Turns C5's tracked history into something a user can actually judge trust by.",["Simple chart/table of past signals vs. actual outcome per ticker."]],
+    ["F4","FE","P0","open","Ticker detail view","Where all four data sources meet in one place for a single ticker.",["Tabbed view combining price chart, news feed, insider filings, and social signal for one ticker."]],
+    ["F5","FE","P0","open","Onboarding flow","The first-run path from “just signed up” to “saw my first signal,” built jointly with UX.",["Guides: enter/validate Claude key → build first watchlist → set schedule → see first signal or a clear “scheduled for X” state."]],
+    ["F6","FE","P0","open","Empty/loading/error states","Makes sure no async view in the dashboard ever shows the user a blank screen.",["Every async view (loading, no data yet, provider error, stale data) has a designed, non-blank state."]]
+  ]},
+  {key:"G", name:"Visual Design / Design System", tickets:[
+    ["G1","UX","P0","open","Visual identity & style guide","Defines what “simple, classy” actually means for this product — palette, type, spacing — before anyone builds a screen.",["Typography, color palette, and spacing scale approved by stakeholder before FE build starts."]],
+    ["G2","UX","P0","open","Component design system (Figma)","One shared vocabulary of components — cards, tabs, tables, nav — for FE to build against.",["Signal card, ticker detail tabs, watchlist table, nav, and charts specced and handed off."]],
+    ["G3","UX","P1","open","Responsive layout specs","Makes desktop-first a deliberate decision, with tablet/mobile handled rather than ignored.",["Desktop-first layouts with defined tablet/mobile breakpoints for dashboard and onboarding."]],
+    ["G4","UX","P1","open","Accessibility design pass","Catches contrast, focus, and hit-target problems on paper before they're built.",["Color contrast, focus states, and hit-target sizing checked against WCAG 2.1 AA at design stage."]],
+    ["G5","UX","P1","open","Landing/marketing page design","Sets correct expectations — research tool, not advice — before anyone signs up.",["Pre-login page communicates what the product does and does not do, with a clear sign-up CTA."]]
+  ]},
+  {key:"H", name:"QA", note:"Scaled down for ~10 friends-and-family users — no test-plan doc, mocked-provider suites, or ongoing cross-provider monitoring. Real bugs still matter, so the pipeline and key security get checked directly, minus the process ceremony.", tickets:[
+    ["H1","QA","P0","open","Core pipeline smoke test","Runs the real pipeline end to end, including a failure case per source, before any real person relies on it.",["Ingestion → analysis → scheduling exercised end-to-end per data source, including one failure case each (missing data, malformed payload, provider downtime), before enabling any real user's schedule."]],
+    ["H2","QA","P0","open","API-key security spot-check","The BYO-key model only works as a trust story if this holds up — checked directly, not via a full test suite.",["Manual code review confirms keys encrypted at rest, never logged, never returned to the client after initial save."]]
+  ]},
+  {key:"I", name:"UX Test Engineering", note:"Cut for friends-and-family scale — ask your ~10 known users directly instead of running moderated studies, formal accessibility audits, or cross-browser/device passes. Revisit if this grows beyond friends & family.", tickets:[
+    ["I1","UXT","P0","open","Direct check-in during onboarding","Asks the single riskiest-feeling moment in the product directly, one real conversation at a time, instead of a formal study.",["When onboarding each real user, directly ask whether API-key entry, watchlist setup, and the first signal made sense and felt trustworthy; issues fed back to FE/UX informally."]]
+  ]},
+  {key:"J", name:"Launch Readiness", note:"Cut entirely (2026-07-18) — there is no public launch for a ~10-user friends-and-family tool. A3/A8 stand on their own without a launch-sign-off gate; D4 already covers job-failure visibility.", tickets:[]}
+];
+
+const allTickets = epics.flatMap(e => e.tickets.map(t => ({
+  epicKey:e.key, id:t[0], tag:t[1], prio:t[2], status:t[3], title:t[4], desc:t[5], ac:t[6]
+})));
+
+// summary: tickets by role
+const tagBars = document.getElementById("tagBars");
+const maxTagCount = Math.max(...TAGS.map(t => allTickets.filter(x=>x.tag===t).length));
+TAGS.forEach(tag => {
+  const n = allTickets.filter(x=>x.tag===tag).length;
+  const row = document.createElement("div");
+  row.className = "tag-bar-row";
+  row.innerHTML = `<span class="tag-bar-label">${tag}</span>
+    <span class="tag-bar-track"><span class="tag-bar-fill" style="width:${(n/maxTagCount*100).toFixed(0)}%"></span></span>
+    <span class="tag-bar-count">${n}</span>`;
+  tagBars.appendChild(row);
+});
+
+// summary: tickets by priority
+const prioRows = document.getElementById("prioRows");
+const PRIOS = [["P0","must ship in MVP"],["P1","fast-follow"],["P2","post-MVP backlog"]];
+PRIOS.forEach(([p,label]) => {
+  const n = allTickets.filter(x=>x.prio===p).length;
+  const row = document.createElement("div");
+  row.className = "stat-row";
+  row.innerHTML = `<span class="chip ${p.toLowerCase()}">${p}</span><span class="label">${label}</span><span class="n">${n}</span>`;
+  prioRows.appendChild(row);
+});
+
+// summary: tickets by status
+const statusRows = document.getElementById("statusRows");
+STATUSES.forEach(([key,label]) => {
+  const n = allTickets.filter(x=>x.status===key).length;
+  const row = document.createElement("div");
+  row.className = "stat-row";
+  row.innerHTML = `<span class="chip status-${key}">${label}</span><span class="n">${n}</span>`;
+  statusRows.appendChild(row);
+});
+
+// filters
+const filterRowTag = document.getElementById("filterRowTag");
+const filterRowMeta = document.getElementById("filterRowMeta");
+const filterNote = document.getElementById("filterNote");
+let activeTag = "ALL", activePrio = "ALL", activeStatus = "ALL";
+
+function makeBtn(label, onClick, groupClass, val) {
+  const b = document.createElement("button");
+  b.className = "f " + groupClass;
+  b.textContent = label;
+  b.dataset.val = val;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+filterRowTag.appendChild(makeBtn("All roles", () => setTag("ALL"), "tagbtn", "ALL"));
+TAGS.forEach(tag => filterRowTag.appendChild(makeBtn(tag, () => setTag(tag), "tagbtn", tag)));
+
+filterRowMeta.appendChild(makeBtn("All priorities", () => setPrio("ALL"), "priobtn", "ALL"));
+["P0","P1"].forEach(p => filterRowMeta.appendChild(makeBtn(p, () => setPrio(p), "priobtn", p)));
+const sep = document.createElement("span");
+sep.style.cssText = "width:1px;align-self:stretch;background:var(--line);margin:0 4px;";
+filterRowMeta.appendChild(sep);
+filterRowMeta.appendChild(makeBtn("All statuses", () => setStatus("ALL"), "statusbtn", "ALL"));
+STATUSES.forEach(([key,label]) => filterRowMeta.appendChild(makeBtn(label, () => setStatus(key), "statusbtn", key)));
+
+function setTag(v) { activeTag = v; render(); }
+function setPrio(v) { activePrio = v; render(); }
+function setStatus(v) { activeStatus = v; render(); }
+
+function render() {
+  document.querySelectorAll(".tagbtn").forEach(b => b.classList.toggle("active", b.dataset.val === activeTag));
+  document.querySelectorAll(".priobtn").forEach(b => b.classList.toggle("active", b.dataset.val === activePrio));
+  document.querySelectorAll(".statusbtn").forEach(b => b.classList.toggle("active", b.dataset.val === activeStatus));
+
+  let shown = 0;
+  epics.forEach(e => {
+    let epicShown = 0;
+    e.tickets.forEach(t => {
+      const [id, tag, prio, status] = t;
+      const match = (activeTag === "ALL" || tag === activeTag)
+        && (activePrio === "ALL" || prio === activePrio)
+        && (activeStatus === "ALL" || status === activeStatus);
+      const el = document.getElementById("ticket-" + id);
+      if (el) el.classList.toggle("hidden", !match);
+      if (match) epicShown++;
+    });
+    const epicEl = document.getElementById("epic-" + e.key);
+    if (epicEl) epicEl.classList.toggle("hidden", e.tickets.length > 0 && epicShown === 0);
+    shown += epicShown;
+  });
+  filterNote.textContent = shown + " of " + allTickets.length + " tickets shown.";
+}
+
+// build epic + ticket DOM
+const STATUS_LABEL = Object.fromEntries(STATUSES.map(([key,label]) => [key,label]));
+const epicsContainer = document.getElementById("epics");
+epics.forEach(e => {
+  const sec = document.createElement("section");
+  sec.className = "epic";
+  sec.id = "epic-" + e.key;
+  const head = document.createElement("div");
+  head.className = "epic-head";
+  head.innerHTML = `<span class="epic-key">${e.key}</span><h3 class="epic-name">${e.name}</h3><span class="epic-count">${e.tickets.length} tickets</span>`;
+  sec.appendChild(head);
+
+  if (e.note) {
+    const noteEl = document.createElement("p");
+    noteEl.className = "epic-note";
+    noteEl.textContent = e.note;
+    sec.appendChild(noteEl);
+  }
+
+  e.tickets.forEach(t => {
+    const [id, tag, prio, status, title, desc, ac] = t;
+    const det = document.createElement("details");
+    det.className = "ticket";
+    det.id = "ticket-" + id;
+    const acHtml = ac.map(a => `<li>${a}</li>`).join("");
+    det.innerHTML = `<summary>
+        <span class="t-id">${id}</span>
+        <span class="t-title">${title}</span>
+        <span class="chip tag">${tag}</span>
+        <span class="chip status-${status}">${STATUS_LABEL[status]}</span>
+        <span class="chip ${prio.toLowerCase()}">${prio}</span>
+        <span class="t-caret">›</span>
+        <span class="t-desc-line">${desc}</span>
+      </summary>
+      <div class="t-body">
+        <ul class="t-ac">${acHtml}</ul>
+      </div>`;
+    sec.appendChild(det);
+  });
+  epicsContainer.appendChild(sec);
+});
+
+// build sequence
+const seq = [
+  ["A1–A5, A8", "Business-analyst groundwork — unblocks everything else."],
+  ["B1–B3, B5, B7 + C1–C3, C6", "Core pipeline and analysis on 3 sources — the thinnest slice that produces a real signal."],
+  ["E1–E3", "Auth and key management, in parallel with the step above."],
+  ["D1–D2", "Scheduling, once the pipeline produces reliable output."],
+  ["F1, F2, F4–F6 + G1–G2", "Dashboard UI, against the same window."],
+  ["B4", "Social speculation as a fast-follow, once the 3-source pipeline is stable."],
+  ["H1–H2", "Pipeline smoke test + key security check, before enabling any real user's schedule."],
+  ["I1", "Direct check-in during onboarding. No formal beta/launch gate — Epic J is cut."]
+];
+const seqList = document.getElementById("seqList");
+seq.forEach(([ids, note]) => {
+  const li = document.createElement("li");
+  li.innerHTML = `<b>${ids}</b> — ${note}`;
+  seqList.appendChild(li);
+});
+
+render();
+</script>

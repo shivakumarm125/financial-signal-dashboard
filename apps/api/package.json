@@ -1,0 +1,29 @@
+{
+  "name": "@financial-adviser/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "ingest:filings": "tsx src/scripts/ingest-filings.ts",
+    "ingest:prices": "tsx src/scripts/ingest-prices.ts",
+    "ingest:news": "tsx src/scripts/ingest-news.ts",
+    "run:all": "tsx src/scripts/run-all.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.3",
+    "@financial-adviser/shared": "*",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "fast-xml-parser": "^4.5.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@esbuild/win32-x64": "^0.28.1",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.16.10",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

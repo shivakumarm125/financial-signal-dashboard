@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One row per publicly traded ticker we track. Shared across all users —
+// ingestion runs once per ticker, not once per (user, ticker) pair, since
+// this data (price/filings/news/social) is identical regardless of who's watching.
+model Ticker {
+  id        String   @id @default(uuid())
+  symbol    String   @unique
+  cik       String?  @unique // SEC's 10-digit zero-padded CIK; null until resolved via company_tickers.json
+  name      String?
+  exchange  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  insiderFilings      InsiderFiling[]
+  filingIngestionState FilingIngestionState?
+  priceBars           PriceBar[]
+  priceIngestionState PriceIngestionState?
+  newsArticles        NewsArticle[]
+  newsIngestionState  NewsIngestionState?
+  usageRecords        UsageRecord[]
+  signalRecords       SignalRecord[]
+
+  @@map("tickers")
+}
+
+// Tracks incremental-sync state per ticker for the EDGAR Form 4 ingestion job (B1),
+// so each run only asks EDGAR for filings newer than the last one already processed.
+model FilingIngestionState {
+  id                     String   @id @default(uuid())
+  ticker                 Ticker   @relation(fields: [tickerId], references: [id])
+  tickerId               String   @unique
+  lastAccessionNumber    String?
+  lastFilingDate         DateTime?
+  updatedAt              DateTime @updatedAt
+
+  @@map("filing_ingestion_state")
+}
+
+// One row per insider transaction line item parsed out of a Form 4 (or Form 4/A) filing.
+// A single filing can contain multiple transactions, so the natural unique key is
+// (accessionNumber, transactionIndex) rather than accessionNumber alone.
+model InsiderFiling {
+  id                String   @id @default(uuid())
+  ticker            Ticker   @relation(fields: [tickerId], references: [id])
+  tickerId          String
+
+  accessionNumber   String   // SEC accession number for the source filing, e.g. "0001234567-26-000123"
+  transactionIndex  Int      // position of this transaction within the filing (0-based)
+  isAmendment       Boolean  @default(false) // true for Form 4/A; stored as an independent record, not linked to the original (documented MVP simplification)
+
+  insiderName       String
+  insiderIsDirector Boolean  @default(false)
+  insiderIsOfficer  Boolean  @default(false)
+  insiderOfficerTitle String?
+  insiderIsTenPercentOwner Boolean @default(false)
+
+  transactionCode   String   // SEC transaction code, e.g. "P" (purchase), "S" (sale)
+  transactionDate   DateTime
+  sharesTransacted  Decimal  @db.Decimal(20, 4)
+  pricePerShare     Decimal? @db.Decimal(20, 4)
+
+  filedAt           DateTime // filing date from EDGAR submissions data
+  createdAt         DateTime @default(now())
+
+  @@unique([accessionNumber, transactionIndex])
+  @@index([tickerId, transactionDate])
+  @@map("insider_filings")
+}
+
+// One row per daily OHLCV bar per ticker (B2). Twelve Data, daily interval only —
+// this product is scheduled/batch by design (A1), never intraday.
+model PriceBar {
+  id       String   @id @default(uuid())
+  ticker   Ticker   @relation(fields: [tickerId], references: [id])
+  tickerId String
+
+  date   DateTime // calendar date of the bar, no time component
+  open   Decimal  @db.Decimal(20, 4)
+  high   Decimal  @db.Decimal(20, 4)
+  low    Decimal  @db.Decimal(20, 4)
+  close  Decimal  @db.Decimal(20, 4)
+  volume BigInt
+
+  createdAt DateTime @default(now())
+
+  @@unique([tickerId, date])
+  @@index([tickerId, date])
+  @@map("price_bars")
+}
+
+// Tracks incremental-sync state per ticker for the price ingestion job (B2), so
+// each run only requests bars newer than the last one already stored — the same
+// pattern as FilingIngestionState, doubly important here given Twelve Data's tight
+// free-tier quota (8 req/min, 800/day).
+model PriceIngestionState {
+  id          String    @id @default(uuid())
+  ticker      Ticker    @relation(fields: [tickerId], references: [id])
+  tickerId    String    @unique
+  lastBarDate DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@map("price_ingestion_state")
+}
+
+// One row per news article per ticker (B3). Finnhub only for MVP (NewsAPI
+// fallback dropped -- its rationale was thin India coverage, and India is out
+// of scope entirely now). Passed raw to Claude per A5, no sentiment pre-tagging.
+model NewsArticle {
+  id       String @id @default(uuid())
+  ticker   Ticker @relation(fields: [tickerId], references: [id])
+  tickerId String
+
+  externalId  String // Finnhub's own article id, stringified
+  source      String
+  headline    String
+  summary     String?
+  url         String
+  publishedAt DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([tickerId, externalId])
+  @@index([tickerId, publishedAt])
+  @@map("news_articles")
+}
+
+// Tracks incremental-sync state per ticker for news ingestion (B3). First run
+// backfills 14 days (Q2) -- unlike price/filings, older news is never actually
+// used (A5 only ever shows Claude the most recent 10 items), so there's no
+// reason to backfill deep history here.
+model NewsIngestionState {
+  id             String    @id @default(uuid())
+  ticker         Ticker    @relation(fields: [tickerId], references: [id])
+  tickerId       String    @unique
+  lastSyncedDate DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@map("news_ingestion_state")
+}
+
+// Records actual token usage/cost for every real Claude call (C4). No User
+// model yet (Epic E not built) -- tracked globally for now, same placeholder
+// pattern as C2's single env-var API key; scoping to per-user is a later,
+// mechanical change once accounts exist.
+model UsageRecord {
+  id               String   @id @default(uuid())
+  ticker           Ticker   @relation(fields: [tickerId], references: [id])
+  tickerId         String
+  inputTokens      Int
+  outputTokens     Int
+  estimatedCostUsd Decimal  @db.Decimal(10, 6)
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("usage_records")
+}
+
+// Stores every generated signal (start of C5's storage half -- the +7-day
+// accuracy comparison half needs real time to pass, so that stays open).
+// confidence is the published, capped value (A5 Q15); rawConfidence is what
+// Claude actually self-reported, kept for transparency/debugging.
+model SignalRecord {
+  id            String   @id @default(uuid())
+  ticker        Ticker   @relation(fields: [tickerId], references: [id])
+  tickerId      String
+  direction     String
+  confidence    Int
+  rawConfidence Int
+  rationale     String
+  createdAt     DateTime @default(now())
+  targetDate    DateTime // createdAt + 7 days (A5's fixed accuracy-tracking horizon)
+
+  // Added 2026-07-19 -- deliberate scope change toward actionable trading
+  // guidance (see docs/A1-mvp-scope.md, docs/A3-disclaimer-data-use.md).
+  entryGuidance String?
+  targetPrice   Decimal? @db.Decimal(20, 4)
+  stopLossPrice Decimal? @db.Decimal(20, 4)
+
+  citations SignalCitation[]
+
+  @@index([tickerId, createdAt])
+  @@map("signal_records")
+}
+
+// Citations are resolved to real, durable source-record IDs at storage time --
+// the short IDs Claude cites (e.g. "filing_0") are only meaningful within the
+// single prompt assembly they came from (C1 Q1: freshly assigned per-prompt),
+// so persisting them as-is would make a stored citation unresolvable later.
+model SignalCitation {
+  id             String       @id @default(uuid())
+  signal         SignalRecord @relation(fields: [signalId], references: [id])
+  signalId       String
+  sourceType     String // "filing" | "news"
+  sourceRecordId String // the real InsiderFiling.id or NewsArticle.id
+
+  @@map("signal_citations")
+}
