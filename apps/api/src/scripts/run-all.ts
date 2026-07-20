@@ -4,6 +4,7 @@ import { ingestFilings } from "../ingestion/edgar/ingestFilings";
 import { ingestPrices } from "../ingestion/twelvedata/ingestPrices";
 import { ingestNews } from "../ingestion/finnhub/ingestNews";
 import { generateSignalWithRetry } from "../analysis/signalRetry";
+import { checkAllPendingOutcomes } from "../analysis/signalOutcomes";
 
 /**
  * D1's scheduled entry point: ingest all 3 built sources, then generate a
@@ -37,6 +38,10 @@ async function main() {
     const outcome = await generateSignalWithRetry(symbol);
     console.log(`[D1] ${symbol}: ${outcome.status}`);
   }
+
+  console.log("[C5] Checking outcomes of past signals against real price data...");
+  const outcomeResult = await checkAllPendingOutcomes();
+  console.log(`[C5] Checked ${outcomeResult.checked}, ${outcomeResult.updated} now have a terminal outcome.`);
 
   await prisma.$disconnect();
 }

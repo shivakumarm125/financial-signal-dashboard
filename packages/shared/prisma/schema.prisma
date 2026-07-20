@@ -184,6 +184,13 @@ model SignalRecord {
   targetPrice   Decimal? @db.Decimal(20, 4)
   stopLossPrice Decimal? @db.Decimal(20, 4)
 
+  // Real outcome tracking (finishing C5, 2026-07-20). null = not yet
+  // evaluated (either too early, or nothing terminal has happened yet).
+  // Checked against actual daily price bars, not simulated.
+  outcome        String?
+  outcomeDetail  String?
+  outcomeCheckedAt DateTime?
+
   citations SignalCitation[]
 
   @@index([tickerId, createdAt])

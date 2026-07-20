@@ -9,7 +9,8 @@
     "ingest:filings": "tsx src/scripts/ingest-filings.ts",
     "ingest:prices": "tsx src/scripts/ingest-prices.ts",
     "ingest:news": "tsx src/scripts/ingest-news.ts",
-    "run:all": "tsx src/scripts/run-all.ts"
+    "run:all": "tsx src/scripts/run-all.ts",
+    "check:outcomes": "tsx src/scripts/check-outcomes.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
