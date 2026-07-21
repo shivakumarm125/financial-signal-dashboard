@@ -89,10 +89,16 @@ export async function ingestPricesForTicker(symbol: string): Promise<TickerPrice
   }
 }
 
-/** Computes technicals on demand from whatever bars are already stored -- no separate persisted snapshot to keep in sync. */
-export async function getStoredTechnicals(tickerId: string): Promise<Technicals> {
+/**
+ * Computes technicals on demand from whatever bars are already stored -- no
+ * separate persisted snapshot to keep in sync. `asOfDate` (default: now)
+ * restricts to bars up to that date -- critical for backtesting, where using
+ * bars after the simulated date would be lookahead bias (the "signal" would
+ * see the future it's supposedly being graded against).
+ */
+export async function getStoredTechnicals(tickerId: string, asOfDate: Date = new Date()): Promise<Technicals> {
   const rows = await prisma.priceBar.findMany({
-    where: { tickerId },
+    where: { tickerId, date: { lte: asOfDate } },
     orderBy: { date: "asc" },
   });
 

@@ -99,8 +99,12 @@ export async function checkAllPendingOutcomes(): Promise<{ checked: number; upda
       where: { tickerId: signal.tickerId, date: { lte: signal.createdAt } },
       orderBy: { date: "desc" },
     });
+    // Bounded by targetDate -- without this, a hit registered weeks after the
+    // real 7-day horizon would still count, quietly drifting from what "+7
+    // days" is supposed to mean (caught while building the backtest, which
+    // made the same mistake before this fix).
     const barsSince = await prisma.priceBar.findMany({
-      where: { tickerId: signal.tickerId, date: { gt: signal.createdAt } },
+      where: { tickerId: signal.tickerId, date: { gt: signal.createdAt, lte: signal.targetDate } },
       orderBy: { date: "asc" },
     });
 
@@ -141,12 +145,10 @@ export interface HitRateSummary {
  * meaningfully stronger result than merely being directionally right when
  * neither level was reached, and conflating them would overstate accuracy.
  */
-export async function getHitRateSummary(): Promise<HitRateSummary> {
-  const evaluated = await prisma.signalRecord.findMany({ where: { outcome: { not: null } } });
-
+function summarizeOutcomes(outcomes: string[]): HitRateSummary {
   const counts: Record<string, number> = {};
-  for (const s of evaluated) {
-    counts[s.outcome!] = (counts[s.outcome!] ?? 0) + 1;
+  for (const o of outcomes) {
+    counts[o] = (counts[o] ?? 0) + 1;
   }
 
   const targetStopEvaluated = (counts.hit_target ?? 0) + (counts.hit_stop ?? 0);
@@ -159,6 +161,17 @@ export async function getHitRateSummary(): Promise<HitRateSummary> {
     directionAccuracy:
       directionOnlyEvaluated > 0 ? Math.round(((counts.expired_direction_correct ?? 0) / directionOnlyEvaluated) * 100) : null,
     directionOnlyEvaluated,
-    totalEvaluated: evaluated.length,
+    totalEvaluated: outcomes.length,
   };
+}
+
+export async function getHitRateSummary(): Promise<HitRateSummary> {
+  const evaluated = await prisma.signalRecord.findMany({ where: { outcome: { not: null } } });
+  return summarizeOutcomes(evaluated.map((s) => s.outcome!));
+}
+
+/** Same summary shape, but for backtest results (a separate table -- see BacktestSignal). */
+export async function getBacktestHitRateSummary(): Promise<HitRateSummary> {
+  const evaluated = await prisma.backtestSignal.findMany();
+  return summarizeOutcomes(evaluated.map((s) => s.outcome));
 }

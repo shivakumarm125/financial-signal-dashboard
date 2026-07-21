@@ -27,6 +27,7 @@ model Ticker {
   newsIngestionState  NewsIngestionState?
   usageRecords        UsageRecord[]
   signalRecords       SignalRecord[]
+  backtestSignals     BacktestSignal[]
 
   @@map("tickers")
 }
@@ -209,4 +210,35 @@ model SignalCitation {
   sourceRecordId String // the real InsiderFiling.id or NewsArticle.id
 
   @@map("signal_citations")
+}
+
+// Backtest results (2026-07-21) -- deliberately a SEPARATE table from
+// SignalRecord, not a flag on it. Keeps synthetic historical-simulation data
+// from ever mixing with the live signal history, and makes wiping/re-running
+// a backtest trivial without risking touching real signals. Every row here
+// is fully resolved at insert time (no "pending" state) -- a backtest is
+// only ever run against dates where the real subsequent outcome is already
+// known history.
+model BacktestSignal {
+  id       String @id @default(uuid())
+  ticker   Ticker @relation(fields: [tickerId], references: [id])
+  tickerId String
+
+  asOfDate      DateTime // the historical date being simulated -- not createdAt
+  entryPrice    Decimal? @db.Decimal(20, 4)
+  direction     String
+  confidence    Int
+  rawConfidence Int
+  rationale     String
+  entryGuidance String?
+  targetPrice   Decimal? @db.Decimal(20, 4)
+  stopLossPrice Decimal? @db.Decimal(20, 4)
+
+  outcome       String
+  outcomeDetail String
+
+  createdAt DateTime @default(now()) // when the backtest was actually run
+
+  @@index([tickerId, asOfDate])
+  @@map("backtest_signals")
 }

@@ -78,3 +78,51 @@ export async function ingestNews(symbols: string[]): Promise<TickerNewsResult[]>
   }
   return results;
 }
+
+/**
+ * Fetches and stores news for a specific historical window (backtesting,
+ * 2026-07-21) -- deliberately does NOT touch NewsIngestionState, since that's
+ * the live incremental-sync pointer and a backtest run must never move it
+ * backward (which would make the next live sync miss real recent news).
+ * Same 14-day lookback the live system uses (BACKFILL_DAYS), just re-pointed
+ * at a historical `endDate` instead of today.
+ */
+export async function ingestHistoricalNews(symbol: string, endDate: Date): Promise<TickerNewsResult> {
+  const ticker = await prisma.ticker.upsert({
+    where: { symbol: symbol.toUpperCase() },
+    update: {},
+    create: { symbol: symbol.toUpperCase() },
+  });
+
+  try {
+    const fromDate = new Date(endDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - BACKFILL_DAYS);
+
+    const articles = await fetchCompanyNews(symbol, formatDate(fromDate), formatDate(endDate));
+
+    for (const article of articles) {
+      await prisma.newsArticle.upsert({
+        where: { tickerId_externalId: { tickerId: ticker.id, externalId: article.externalId } },
+        update: {},
+        create: {
+          tickerId: ticker.id,
+          externalId: article.externalId,
+          source: article.source,
+          headline: article.headline,
+          summary: article.summary,
+          url: article.url,
+          publishedAt: article.publishedAt,
+        },
+      });
+    }
+
+    return { symbol, status: "ok", articlesStored: articles.length };
+  } catch (err) {
+    return {
+      symbol,
+      status: "error",
+      articlesStored: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

@@ -36,8 +36,8 @@ export interface AssembledContext {
   currentPrice: number | null; // feeds C3's entry/target/stop-loss sanity check (added 2026-07-19)
 }
 
-function daysAgo(n: number): Date {
-  const d = new Date();
+function daysAgo(n: number, from: Date): Date {
+  const d = new Date(from);
   d.setUTCDate(d.getUTCDate() - n);
   return d;
 }
@@ -55,8 +55,13 @@ function insiderRoleLabel(f: { insiderIsOfficer: boolean; insiderOfficerTitle: s
  * data for this ticker. Social (B4) isn't built yet -- reported as no
  * coverage per A5's Q20 rule, not a placeholder integration point built
  * ahead of the source actually existing.
+ *
+ * `asOfDate` (default: now) restricts every source to data at or before that
+ * date -- this is what makes backtesting (2026-07-21) valid rather than
+ * lookahead-biased. A "signal" simulated for a past date must only see what
+ * actually existed by then, never data from after it.
  */
-export async function assembleContextForTicker(symbol: string): Promise<AssembledContext> {
+export async function assembleContextForTicker(symbol: string, asOfDate: Date = new Date()): Promise<AssembledContext> {
   const ticker = await prisma.ticker.findUnique({ where: { symbol: symbol.toUpperCase() } });
   if (!ticker) {
     throw new Error(`Ticker ${symbol} not found -- must be ingested (B1/B2/B3) before assembling a prompt.`);
@@ -66,7 +71,7 @@ export async function assembleContextForTicker(symbol: string): Promise<Assemble
 
   // --- Insider filings: pre-tagged (A5 hybrid design) ---
   const filings = await prisma.insiderFiling.findMany({
-    where: { tickerId: ticker.id, transactionDate: { gte: daysAgo(INSIDER_LOOKBACK_DAYS) } },
+    where: { tickerId: ticker.id, transactionDate: { gte: daysAgo(INSIDER_LOOKBACK_DAYS, asOfDate), lte: asOfDate } },
     orderBy: { transactionDate: "desc" },
     take: MAX_INSIDER_FILINGS,
   });
@@ -85,12 +90,12 @@ export async function assembleContextForTicker(symbol: string): Promise<Assemble
   });
 
   // --- Price/technicals: pre-tagged (A5), a single summary, not individually citable ---
-  const technicals = await getStoredTechnicals(ticker.id);
+  const technicals = await getStoredTechnicals(ticker.id, asOfDate);
   const hasPriceData = technicals.ma50 !== null || technicals.ma200 !== null;
 
   // --- News: raw (A5) -- no sentiment pre-tagging, individually citable ---
   const news = await prisma.newsArticle.findMany({
-    where: { tickerId: ticker.id },
+    where: { tickerId: ticker.id, publishedAt: { lte: asOfDate } },
     orderBy: { publishedAt: "desc" },
     take: MAX_NEWS_ITEMS,
   });
