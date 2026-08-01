@@ -1,5 +1,15 @@
 import { prisma } from "@financial-adviser/shared";
 
+// Hit-rate summarising moved to packages/shared so the web dashboard and these
+// scripts report identical numbers. Re-exported here so existing callers
+// (run-backtest.ts, run-all.ts, check-outcomes.ts) keep their import path.
+export {
+  summarizeOutcomes,
+  getHitRateSummary,
+  getBacktestHitRateSummary,
+  type HitRateSummary,
+} from "@financial-adviser/shared";
+
 export type SignalOutcomeStatus =
   | "pending"
   | "hit_target"
@@ -130,48 +140,3 @@ export async function checkAllPendingOutcomes(): Promise<{ checked: number; upda
   return { checked: pending.length, updated };
 }
 
-export interface HitRateSummary {
-  counts: Record<string, number>;
-  targetHitRate: number | null;
-  targetStopEvaluated: number;
-  directionAccuracy: number | null;
-  directionOnlyEvaluated: number;
-  totalEvaluated: number;
-}
-
-/**
- * Reports target-hit-rate and directional-accuracy as two SEPARATE numbers,
- * not blended into one -- actually hitting the suggested target is a
- * meaningfully stronger result than merely being directionally right when
- * neither level was reached, and conflating them would overstate accuracy.
- */
-function summarizeOutcomes(outcomes: string[]): HitRateSummary {
-  const counts: Record<string, number> = {};
-  for (const o of outcomes) {
-    counts[o] = (counts[o] ?? 0) + 1;
-  }
-
-  const targetStopEvaluated = (counts.hit_target ?? 0) + (counts.hit_stop ?? 0);
-  const directionOnlyEvaluated = (counts.expired_direction_correct ?? 0) + (counts.expired_direction_wrong ?? 0);
-
-  return {
-    counts,
-    targetHitRate: targetStopEvaluated > 0 ? Math.round(((counts.hit_target ?? 0) / targetStopEvaluated) * 100) : null,
-    targetStopEvaluated,
-    directionAccuracy:
-      directionOnlyEvaluated > 0 ? Math.round(((counts.expired_direction_correct ?? 0) / directionOnlyEvaluated) * 100) : null,
-    directionOnlyEvaluated,
-    totalEvaluated: outcomes.length,
-  };
-}
-
-export async function getHitRateSummary(): Promise<HitRateSummary> {
-  const evaluated = await prisma.signalRecord.findMany({ where: { outcome: { not: null } } });
-  return summarizeOutcomes(evaluated.map((s) => s.outcome!));
-}
-
-/** Same summary shape, but for backtest results (a separate table -- see BacktestSignal). */
-export async function getBacktestHitRateSummary(): Promise<HitRateSummary> {
-  const evaluated = await prisma.backtestSignal.findMany();
-  return summarizeOutcomes(evaluated.map((s) => s.outcome));
-}

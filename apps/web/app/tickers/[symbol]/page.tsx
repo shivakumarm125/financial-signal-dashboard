@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { prisma } from "@financial-adviser/shared";
+import { prisma, computeReachability } from "@financial-adviser/shared";
+import { ReachabilityDetail } from "../../components/Reachability";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,15 @@ export default async function TickerDetailPage({ params }: { params: { symbol: s
 
   const latestBar = priceBars[0];
 
+  const reachability = latestSignal
+    ? await computeReachability({
+        tickerId: ticker.id,
+        direction: latestSignal.direction,
+        targetPrice: latestSignal.targetPrice ? Number(latestSignal.targetPrice) : null,
+        confidence: latestSignal.confidence,
+      })
+    : null;
+
   return (
     <main>
       <p className="mb-8">
@@ -64,7 +74,7 @@ export default async function TickerDetailPage({ params }: { params: { symbol: s
               {latestSignal.direction}
             </span>
             <span className="text-sm text-muted">
-              {latestSignal.confidence}% confidence
+              {latestSignal.confidence}% direction confidence
               {latestSignal.rawConfidence !== latestSignal.confidence && (
                 <span> (Claude said {latestSignal.rawConfidence}%, capped — signals disagreed)</span>
               )}
@@ -90,6 +100,12 @@ export default async function TickerDetailPage({ params }: { params: { symbol: s
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {reachability && (
+            <div className="mt-4">
+              <ReachabilityDetail result={reachability} />
             </div>
           )}
 
