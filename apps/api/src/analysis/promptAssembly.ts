@@ -7,6 +7,53 @@ const INSIDER_LOOKBACK_DAYS = 90;
 const MAX_INSIDER_FILINGS = 10;
 const MAX_NEWS_ITEMS = 10;
 
+// A5's fixed accuracy-tracking horizon. The prompt used to omit this entirely:
+// levels were requested as "grounded in the recent trading range/resistance"
+// with no time bound, then graded at exactly 7 days -- the model was answering
+// a different question from the one it was scored on. Kept in sync with
+// HORIZON_DAYS in signalOutcomes/runBacktest.
+const SIGNAL_HORIZON_DAYS = 7;
+
+const EARNINGS_HOUR_LABELS: Record<string, string> = {
+  bmo: "before market open",
+  amc: "after market close",
+  dmh: "during market hours",
+};
+
+function formatEarnings(e: EarningsInfo): string {
+  if (!e.hasData) {
+    return "  No earnings-date data available for this ticker.";
+  }
+
+  const lines: string[] = [];
+
+  if (e.nextDate === null) {
+    lines.push("  Next scheduled report: none on the calendar.");
+  } else {
+    const hour = e.nextHour ? ` (${EARNINGS_HOUR_LABELS[e.nextHour] ?? e.nextHour})` : "";
+    const est = e.nextEpsEstimate !== null ? `, consensus EPS estimate ${e.nextEpsEstimate}` : "";
+    const days = e.daysUntilNext;
+    const inHorizon = days !== null && days <= SIGNAL_HORIZON_DAYS;
+    lines.push(
+      `  Next scheduled report: ${e.nextDate}${hour} -- ${days} day(s) away${est}.` +
+        (inHorizon
+          ? `  ** THIS FALLS INSIDE THE ${SIGNAL_HORIZON_DAYS}-DAY SIGNAL HORIZON. **`
+          : `  (outside the ${SIGNAL_HORIZON_DAYS}-day horizon)`)
+    );
+  }
+
+  if (e.lastDate !== null) {
+    const actual = e.lastEpsActual !== null ? `EPS ${e.lastEpsActual}` : "EPS not reported";
+    const vs =
+      e.lastEpsActual !== null && e.lastEpsEstimate !== null
+        ? ` vs ${e.lastEpsEstimate} expected (${e.lastEpsActual >= e.lastEpsEstimate ? "beat/in line" : "miss"})`
+        : "";
+    lines.push(`  Most recent report: ${e.lastDate} -- ${actual}${vs}.`);
+  }
+
+  return lines.join("\n");
+}
+
 export interface CitationRecord {
   type: "filing" | "news";
   recordId: string; // the real DB row id, resolved from the short prompt-scoped id below
@@ -20,6 +67,17 @@ export interface SourceCoverage {
 }
 
 export type PreTagDirection = "bullish" | "bearish" | "neutral";
+
+export interface EarningsInfo {
+  hasData: boolean;
+  nextDate: string | null;
+  nextHour: string | null; // "bmo" | "amc" | "dmh"
+  daysUntilNext: number | null;
+  nextEpsEstimate: number | null;
+  lastDate: string | null;
+  lastEpsActual: number | null;
+  lastEpsEstimate: number | null;
+}
 
 export interface PreTagDirections {
   insider: PreTagDirection; // from net buy/sell shares; neutral when no filings or net is exactly 0
@@ -107,6 +165,33 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     return `  [${id}] ${n.publishedAt.toISOString().slice(0, 10)} | ${n.source} | ${n.headline}${summary}`;
   });
 
+  // --- Earnings calendar (B10) ---
+  // Backtest-safe: both queries are bounded by asOfDate, so a simulated past
+  // date never sees a report that hadn't happened yet. Knowing a FUTURE date is
+  // legitimate (companies announce them in advance); knowing a future RESULT is
+  // not, which is why actuals are only ever read from the past query.
+  const nextEarnings = await prisma.earningsEvent.findFirst({
+    where: { tickerId: ticker.id, date: { gte: asOfDate } },
+    orderBy: { date: "asc" },
+  });
+  const lastEarnings = await prisma.earningsEvent.findFirst({
+    where: { tickerId: ticker.id, date: { lt: asOfDate } },
+    orderBy: { date: "desc" },
+  });
+
+  const earningsInfo: EarningsInfo = {
+    hasData: Boolean(nextEarnings || lastEarnings),
+    nextDate: nextEarnings ? nextEarnings.date.toISOString().slice(0, 10) : null,
+    nextHour: nextEarnings?.hour ?? null,
+    daysUntilNext: nextEarnings
+      ? Math.round((nextEarnings.date.getTime() - asOfDate.getTime()) / 86_400_000)
+      : null,
+    nextEpsEstimate: nextEarnings?.epsEstimate ? Number(nextEarnings.epsEstimate) : null,
+    lastDate: lastEarnings ? lastEarnings.date.toISOString().slice(0, 10) : null,
+    lastEpsActual: lastEarnings?.epsActual ? Number(lastEarnings.epsActual) : null,
+    lastEpsEstimate: lastEarnings?.epsEstimate ? Number(lastEarnings.epsEstimate) : null,
+  };
+
   const sourceCoverage: SourceCoverage = {
     filings: filings.length > 0,
     price: hasPriceData,
@@ -135,6 +220,7 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     hasPriceData,
     newsLines,
     sourceCoverage,
+    earningsInfo,
   });
 
   return {
@@ -178,6 +264,7 @@ function buildPromptText(input: {
   hasPriceData: boolean;
   newsLines: string[];
   sourceCoverage: SourceCoverage;
+  earningsInfo: EarningsInfo;
 }): string {
   const missingSources: string[] = [];
   if (!input.sourceCoverage.filings) missingSources.push("insider filings");
@@ -208,16 +295,21 @@ ${formatTechnicals(input.technicals, input.hasPriceData)}
 ## Recent news (raw, read for genuine sentiment)
 ${input.newsLines.length > 0 ? input.newsLines.join("\n") : "  No recent news found."}
 
+## Earnings calendar
+${formatEarnings(input.earningsInfo)}
+
 ## Source coverage
 ${coverageNote}
 
 ## Output instructions
+**This signal will be evaluated over a ${SIGNAL_HORIZON_DAYS}-day horizon.** Every judgement below -- direction, confidence, and especially the price levels -- must be about what is likely to happen in the next ${SIGNAL_HORIZON_DAYS} days, not about where the stock may go eventually. If the earnings section above shows a report scheduled inside that window, treat it as a material source of two-sided risk: it can invalidate a directional call regardless of how the filings, technicals and news currently read, and your confidence should reflect that uncertainty rather than ignore it.
+
 Determine direction (bullish/bearish/neutral), confidence (0-100), and a rationale. The rationale must acknowledge the source coverage note above, and if direction is neutral, must name the conflicting signals. For citations, cite only the bracketed IDs that actually appear above (e.g. "filing_0", "news_2") -- do not invent an ID that isn't listed.
 
 Also provide entry/target/stop-loss guidance, grounded in the actual current price and recent trading range above -- never invent a price level unrelated to real data:
 - entryGuidance: plain-language guidance on whether current price looks like a reasonable entry, a better level to wait for, or (for bearish/neutral) whether to avoid new entries and what an existing holder should consider.
-- targetPrice: a specific take-profit price if direction is bullish (or a level to consider exiting a long if bearish/neutral), grounded in the recent trading range/resistance -- null if direction is neutral and there's no clear level.
-- stopLossPrice: a specific protective price -- for bullish, must be BELOW the current price; for bearish, must be ABOVE the current price (the level at which the bearish thesis would be invalidated for someone still holding). Null if direction is neutral.
+- targetPrice: a specific take-profit price if direction is bullish (or a level to consider exiting a long if bearish/neutral), grounded in the recent trading range/resistance. It must be a level the stock could plausibly REACH within ${SIGNAL_HORIZON_DAYS} days given its recent daily ranges -- a technically valid level that would realistically take months to reach is wrong here. Null if direction is neutral and there's no clear level.
+- stopLossPrice: a specific protective price -- for bullish, must be BELOW the current price; for bearish, must be ABOVE the current price (the level at which the bearish thesis would be invalidated for someone still holding). Set it against the stock's normal ${SIGNAL_HORIZON_DAYS}-day volatility, so ordinary noise doesn't trigger it. Null if direction is neutral.
 
 (Response format is enforced separately via structured outputs -- this section only needs to guide *content*, not JSON shape.)`;
 }

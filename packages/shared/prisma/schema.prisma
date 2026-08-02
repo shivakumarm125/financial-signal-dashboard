@@ -25,6 +25,7 @@ model Ticker {
   priceIngestionState PriceIngestionState?
   newsArticles        NewsArticle[]
   newsIngestionState  NewsIngestionState?
+  earningsEvents      EarningsEvent[]
   usageRecords        UsageRecord[]
   signalRecords       SignalRecord[]
   backtestSignals     BacktestSignal[]
@@ -131,6 +132,40 @@ model NewsArticle {
   @@unique([tickerId, externalId])
   @@index([tickerId, publishedAt])
   @@map("news_articles")
+}
+
+// Scheduled earnings dates (B10, added 2026-08-02). Exists because of a real,
+// diagnosed failure: on 2026-07-30 the pipeline published a bullish AAPL signal
+// with a $345 target and a 7-day horizon, hours before Apple reported Q3 after
+// the close. The stock fell ~8% and four consecutive signals stopped out on the
+// same day. The model had no way to know an earnings print was coming -- that
+// is a missing INPUT, not a prompt-wording problem, and no amount of prompt
+// tuning could have fixed it.
+//
+// Finnhub returns occasional duplicate rows for one date under different
+// quarter labels, so the unique key is (tickerId, date) and later rows for a
+// date overwrite earlier ones.
+model EarningsEvent {
+  id       String @id @default(uuid())
+  ticker   Ticker @relation(fields: [tickerId], references: [id])
+  tickerId String
+
+  date    DateTime // the scheduled/actual report date
+  hour    String? // "bmo" (before open), "amc" (after close), "dmh" (during hours)
+  quarter Int?
+  year    Int?
+
+  epsEstimate     Decimal? @db.Decimal(20, 4)
+  epsActual       Decimal? @db.Decimal(20, 4)
+  revenueEstimate BigInt?
+  revenueActual   BigInt?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tickerId, date])
+  @@index([tickerId, date])
+  @@map("earnings_events")
 }
 
 // Tracks incremental-sync state per ticker for news ingestion (B3). First run

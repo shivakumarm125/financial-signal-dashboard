@@ -3,6 +3,7 @@ import { prisma } from "@financial-adviser/shared";
 import { ingestFilings } from "../ingestion/edgar/ingestFilings";
 import { ingestPrices } from "../ingestion/twelvedata/ingestPrices";
 import { ingestNews } from "../ingestion/finnhub/ingestNews";
+import { ingestEarnings } from "../ingestion/finnhub/ingestEarnings";
 import { generateSignalWithRetry } from "../analysis/signalRetry";
 import { checkAllPendingOutcomes } from "../analysis/signalOutcomes";
 
@@ -32,6 +33,12 @@ async function main() {
 
   console.log("[D1] Ingesting news (B3)...");
   await ingestNews(symbols);
+
+  console.log("[D1] Ingesting earnings calendar (B10)...");
+  const earningsResults = await ingestEarnings(symbols);
+  for (const r of earningsResults) {
+    if (r.status === "error") console.error(`[B10] ${r.symbol}: ${r.error}`);
+  }
 
   console.log("[D1] Generating signals (C1-C6)...");
   for (const symbol of symbols) {
