@@ -16,20 +16,33 @@ function count(n: number): { text: string; className: string } {
 export default async function ManagePage() {
   const tickers = await prisma.ticker.findMany({ orderBy: { symbol: "asc" } });
 
-  const rows = await Promise.all(
-    tickers.map(async (t) => {
-      const [bars, filings, news, earnings, signals, latestBar, latestSignal] = await Promise.all([
-        prisma.priceBar.count({ where: { tickerId: t.id } }),
-        prisma.insiderFiling.count({ where: { tickerId: t.id } }),
-        prisma.newsArticle.count({ where: { tickerId: t.id } }),
-        prisma.earningsEvent.count({ where: { tickerId: t.id } }),
-        prisma.signalRecord.count({ where: { tickerId: t.id } }),
-        prisma.priceBar.findFirst({ where: { tickerId: t.id }, orderBy: { date: "desc" } }),
-        prisma.signalRecord.findFirst({ where: { tickerId: t.id }, orderBy: { createdAt: "desc" } }),
-      ]);
-      return { ticker: t, bars, filings, news, earnings, signals, latestBar, latestSignal };
-    })
-  );
+  // Aggregate per table rather than per ticker. The obvious version -- seven
+  // queries inside a map over tickers -- issues 7xN concurrent queries, which
+  // is what took this page down in production: with connection_limit=1 (correct
+  // for serverless, see client.ts) they queue on one connection and blow
+  // Prisma's 10s pool timeout with P2024. Five groupBys is a fixed cost no
+  // matter how many tickers are on the watchlist.
+  const [barStats, filingStats, newsStats, earningsStats, signalStats] = await Promise.all([
+    prisma.priceBar.groupBy({ by: ["tickerId"], _count: { _all: true }, _max: { date: true } }),
+    prisma.insiderFiling.groupBy({ by: ["tickerId"], _count: { _all: true } }),
+    prisma.newsArticle.groupBy({ by: ["tickerId"], _count: { _all: true } }),
+    prisma.earningsEvent.groupBy({ by: ["tickerId"], _count: { _all: true } }),
+    prisma.signalRecord.groupBy({ by: ["tickerId"], _count: { _all: true }, _max: { createdAt: true } }),
+  ]);
+
+  const countOf = (stats: { tickerId: string; _count: { _all: number } }[], id: string) =>
+    stats.find((s) => s.tickerId === id)?._count._all ?? 0;
+
+  const rows = tickers.map((t) => ({
+    ticker: t,
+    bars: countOf(barStats, t.id),
+    filings: countOf(filingStats, t.id),
+    news: countOf(newsStats, t.id),
+    earnings: countOf(earningsStats, t.id),
+    signals: countOf(signalStats, t.id),
+    latestBarDate: barStats.find((s) => s.tickerId === t.id)?._max.date ?? null,
+    latestSignalDate: signalStats.find((s) => s.tickerId === t.id)?._max.createdAt ?? null,
+  }));
 
   const full = tickers.length >= MAX_TICKERS;
 
@@ -105,10 +118,8 @@ export default async function ManagePage() {
                       <td className={`py-3 text-right ${news.className}`}>{news.text}</td>
                       <td className={`py-3 text-right ${earnings.className}`}>{earnings.text}</td>
                       <td className="py-3 text-right">{r.signals}</td>
-                      <td className="py-3 text-muted whitespace-nowrap">{fmtDate(r.latestBar?.date)}</td>
-                      <td className="py-3 text-muted whitespace-nowrap">
-                        {fmtDate(r.latestSignal?.createdAt)}
-                      </td>
+                      <td className="py-3 text-muted whitespace-nowrap">{fmtDate(r.latestBarDate)}</td>
+                      <td className="py-3 text-muted whitespace-nowrap">{fmtDate(r.latestSignalDate)}</td>
                       <td className="py-3">
                         <RemoveTickerForm symbol={r.ticker.symbol} />
                       </td>
