@@ -14,7 +14,8 @@ export async function persistSignal(
   tickerId: string,
   signal: Signal,
   rawConfidence: number,
-  citationMap: Record<string, CitationRecord>
+  citationMap: Record<string, CitationRecord>,
+  entryPrice: number | null
 ): Promise<void> {
   const targetDate = new Date();
   targetDate.setUTCDate(targetDate.getUTCDate() + ACCURACY_HORIZON_DAYS);
@@ -29,6 +30,8 @@ export async function persistSignal(
       entryGuidance: signal.entryGuidance,
       targetPrice: signal.targetPrice,
       stopLossPrice: signal.stopLossPrice,
+      // Captured now, not re-derived at grading time -- see the schema comment.
+      entryPrice,
       targetDate,
       citations: {
         create: signal.citations

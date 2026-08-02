@@ -250,12 +250,26 @@ model SignalRecord {
   targetPrice   Decimal? @db.Decimal(20, 4)
   stopLossPrice Decimal? @db.Decimal(20, 4)
 
+  // The price the signal was actually judged against, captured at generation
+  // time (2026-08-02). Previously the outcome checker re-derived this from
+  // whichever price bar happened to be <= createdAt, which meant the recorded
+  // entry could quietly change if bars were re-ingested or revised. Storing it
+  // makes the grade reproducible.
+  entryPrice Decimal? @db.Decimal(20, 4)
+
   // Real outcome tracking (finishing C5, 2026-07-20). null = not yet
   // evaluated (either too early, or nothing terminal has happened yet).
   // Checked against actual daily price bars, not simulated.
   outcome        String?
   outcomeDetail  String?
   outcomeCheckedAt DateTime?
+
+  // The market day the outcome actually resolved on -- the date a target or
+  // stop was touched. Added 2026-08-02: the distinct-episode count that the
+  // whole track record leans on was being derived by REGEX over outcomeDetail,
+  // which is prose. That worked because we write the string ourselves, but it
+  // made a headline statistic depend on a sentence's wording.
+  outcomeResolvedOn DateTime?
 
   citations SignalCitation[]
 
@@ -301,6 +315,8 @@ model BacktestSignal {
 
   outcome       String
   outcomeDetail String
+  /// Market day the outcome resolved on -- see SignalRecord.outcomeResolvedOn.
+  outcomeResolvedOn DateTime?
 
   createdAt DateTime @default(now()) // when the backtest was actually run
 

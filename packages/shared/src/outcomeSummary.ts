@@ -28,23 +28,24 @@ export interface HitRateSummary {
 export interface OutcomeRow {
   outcome: string;
   outcomeDetail: string | null;
+  outcomeResolvedOn?: Date | null;
 }
 
 /** Outcome statuses where a target or stop level was actually touched. */
 const TERMINAL_LEVEL_OUTCOMES = new Set(["hit_target", "hit_stop", "ambiguous_same_day"]);
 
 /**
- * Pulls the resolution date out of the detail string. checkOutcome() writes
- * these itself in a fixed "... on YYYY-MM-DD ..." shape, so this is parsing our
- * own output, not a third party's. If the format ever changes this degrades to
- * "no distinct-day info" rather than to a wrong number.
+ * The market day an outcome actually resolved on.
  *
- * (Worth storing as a real column eventually — see the follow-up note in
- * TICKETS.md C5 — but that needs a migration plus a backfill of existing rows.)
+ * Reads the stored `outcomeResolvedOn` column. The regex fallback covers only
+ * rows written before that column existed (2026-08-02) plus anything that
+ * escapes the backfill — but until then the regex WAS the mechanism, which made
+ * the distinct-episode count behind every hit rate on this dashboard depend on
+ * the wording of a prose sentence.
  */
-function resolutionDate(detail: string | null): string | null {
-  if (!detail) return null;
-  const match = detail.match(/on (\d{4}-\d{2}-\d{2})/);
+function resolutionDate(row: OutcomeRow): string | null {
+  if (row.outcomeResolvedOn) return row.outcomeResolvedOn.toISOString().slice(0, 10);
+  const match = row.outcomeDetail?.match(/on (\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : null;
 }
 
@@ -66,7 +67,7 @@ export function summarizeOutcomes(rows: OutcomeRow[]): HitRateSummary {
   const days = new Set<string>();
   for (const r of rows) {
     if (!TERMINAL_LEVEL_OUTCOMES.has(r.outcome)) continue;
-    const d = resolutionDate(r.outcomeDetail);
+    const d = resolutionDate(r);
     if (d) days.add(d);
   }
 
@@ -84,7 +85,7 @@ export function summarizeOutcomes(rows: OutcomeRow[]): HitRateSummary {
 
 export async function getHitRateSummary(): Promise<HitRateSummary> {
   const evaluated = await prisma.signalRecord.findMany({ where: { outcome: { not: null } } });
-  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome!, outcomeDetail: s.outcomeDetail })));
+  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome!, outcomeDetail: s.outcomeDetail, outcomeResolvedOn: s.outcomeResolvedOn })));
 }
 
 /**
@@ -100,17 +101,17 @@ export async function getHitRateSummary(): Promise<HitRateSummary> {
  */
 export async function getHitRateSummaryForTicker(tickerId: string): Promise<HitRateSummary> {
   const evaluated = await prisma.signalRecord.findMany({ where: { tickerId, outcome: { not: null } } });
-  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome!, outcomeDetail: s.outcomeDetail })));
+  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome!, outcomeDetail: s.outcomeDetail, outcomeResolvedOn: s.outcomeResolvedOn })));
 }
 
 /** Same summary shape, but for backtest results (a separate table -- see BacktestSignal). */
 export async function getBacktestHitRateSummary(): Promise<HitRateSummary> {
   const evaluated = await prisma.backtestSignal.findMany();
-  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome, outcomeDetail: s.outcomeDetail })));
+  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome, outcomeDetail: s.outcomeDetail, outcomeResolvedOn: s.outcomeResolvedOn })));
 }
 
 /** Per-ticker backtest summary, kept separate from live signals for the same reason the global one is. */
 export async function getBacktestHitRateSummaryForTicker(tickerId: string): Promise<HitRateSummary> {
   const evaluated = await prisma.backtestSignal.findMany({ where: { tickerId } });
-  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome, outcomeDetail: s.outcomeDetail })));
+  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome, outcomeDetail: s.outcomeDetail, outcomeResolvedOn: s.outcomeResolvedOn })));
 }

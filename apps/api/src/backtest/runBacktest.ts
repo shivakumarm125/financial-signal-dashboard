@@ -109,6 +109,7 @@ export async function runBacktestPoint(symbol: string, asOfDate: Date): Promise<
           stopLossPrice: finalSignal.stopLossPrice,
           outcome: outcome.status,
           outcomeDetail: outcome.detail,
+          outcomeResolvedOn: outcome.resolvedOn ?? null,
         },
       });
 

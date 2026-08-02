@@ -47,7 +47,13 @@ export async function generateValidatedSignal(symbol: string): Promise<Validated
 
     if (citationsOk && tradeLevelsOk) {
       const finalSignal = applyConfidenceCapping(result.signal, context.preTagDirections);
-      await persistSignal(context.tickerId, finalSignal, result.signal.confidence, context.citationMap);
+      await persistSignal(
+        context.tickerId,
+        finalSignal,
+        result.signal.confidence,
+        context.citationMap,
+        context.currentPrice
+      );
       return {
         status: "ok",
         tickerSymbol: symbol,

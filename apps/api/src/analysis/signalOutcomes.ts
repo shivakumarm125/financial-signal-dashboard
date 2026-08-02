@@ -29,6 +29,13 @@ export interface OutcomeBar {
 export interface OutcomeResult {
   status: SignalOutcomeStatus;
   detail: string;
+  /**
+   * The market day a target or stop was actually touched. Returned as real data
+   * rather than left to be read back out of `detail` -- the distinct-episode
+   * count behind every hit rate used to be recovered by regex over that prose.
+   * Null for outcomes that never touched a level.
+   */
+  resolvedOn?: Date | null;
 }
 
 /**
@@ -71,13 +78,22 @@ export function checkOutcome(
       return {
         status: "ambiguous_same_day",
         detail: `Both target and stop touched on ${dateStr} (high $${bar.high}, low $${bar.low}) -- can't tell which came first from daily data.`,
+        resolvedOn: bar.date,
       };
     }
     if (hitTarget) {
-      return { status: "hit_target", detail: `Target $${targetPrice} reached on ${dateStr} (high $${bar.high}).` };
+      return {
+        status: "hit_target",
+        detail: `Target $${targetPrice} reached on ${dateStr} (high $${bar.high}).`,
+        resolvedOn: bar.date,
+      };
     }
     if (hitStop) {
-      return { status: "hit_stop", detail: `Stop-loss $${stopLossPrice} reached on ${dateStr} (low $${bar.low}).` };
+      return {
+        status: "hit_stop",
+        detail: `Stop-loss $${stopLossPrice} reached on ${dateStr} (low $${bar.low}).`,
+        resolvedOn: bar.date,
+      };
     }
   }
 
@@ -105,10 +121,16 @@ export async function checkAllPendingOutcomes(): Promise<{ checked: number; upda
 
   let updated = 0;
   for (const signal of pending) {
-    const entryBar = await prisma.priceBar.findFirst({
-      where: { tickerId: signal.tickerId, date: { lte: signal.createdAt } },
-      orderBy: { date: "desc" },
-    });
+    // Prefer the entry price captured when the signal was generated. Falling
+    // back to a re-derived bar keeps pre-2026-08-02 rows gradeable, but the
+    // stored value is what makes a grade reproducible.
+    const entryBar = signal.entryPrice
+      ? null
+      : await prisma.priceBar.findFirst({
+          where: { tickerId: signal.tickerId, date: { lte: signal.createdAt } },
+          orderBy: { date: "desc" },
+        });
+    const entryPrice = signal.entryPrice ? Number(signal.entryPrice) : entryBar ? Number(entryBar.close) : null;
     // Bounded by targetDate -- without this, a hit registered weeks after the
     // real 7-day horizon would still count, quietly drifting from what "+7
     // days" is supposed to mean (caught while building the backtest, which
@@ -122,7 +144,7 @@ export async function checkAllPendingOutcomes(): Promise<{ checked: number; upda
       signal.direction,
       signal.targetPrice ? Number(signal.targetPrice) : null,
       signal.stopLossPrice ? Number(signal.stopLossPrice) : null,
-      entryBar ? Number(entryBar.close) : null,
+      entryPrice,
       signal.targetDate,
       barsSince.map((b) => ({ date: b.date, high: Number(b.high), low: Number(b.low), close: Number(b.close) })),
       new Date()
@@ -131,7 +153,12 @@ export async function checkAllPendingOutcomes(): Promise<{ checked: number; upda
     if (result.status !== "pending") {
       await prisma.signalRecord.update({
         where: { id: signal.id },
-        data: { outcome: result.status, outcomeDetail: result.detail, outcomeCheckedAt: new Date() },
+        data: {
+          outcome: result.status,
+          outcomeDetail: result.detail,
+          outcomeCheckedAt: new Date(),
+          outcomeResolvedOn: result.resolvedOn ?? null,
+        },
       });
       updated++;
     }
