@@ -1,5 +1,6 @@
 import { prisma, computeReachability } from "@financial-adviser/shared";
 import { ReachabilityChip } from "./components/Reachability";
+import { PipelineStatus } from "./components/PipelineStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,8 @@ export default async function WatchlistPage() {
 
   return (
     <main>
+      <PipelineStatus />
+
       {rows.length === 0 ? (
         <p className="text-muted">No tickers tracked yet.</p>
       ) : (

@@ -164,7 +164,13 @@ Tag legend: **BA** · **BE** (Backend Dev) · **FE** (Frontend Dev) · **UX** (U
 **D3. Email/in-app notification on new results** — P1
 - AC: User is notified when a scheduled run completes with new predictions, linking directly to the results.
 
-**D4. Job monitoring & failure alerting** — P0
+**D4. Job monitoring & failure alerting** — P0 — ✅ **Built**, verified (2026-08-02)
+- AC: Failed/skipped runs are logged and retried once automatically; repeated failure surfaces to the user and to an internal ops alert.
+- Built because two failures on 2026-08-02 proved the system doesn't announce itself when it breaks: production 500'd on every page for hours with nobody aware, and a Vercel build silently skipped a fix while still looking like a successful push. The daily job spends real money unattended; the previous detection mechanism was noticing stale signals days later.
+- **The core problem was that a green tick proved nothing.** `run-all.ts` deliberately continues past one ticker's failed signal so a single bad ticker can't kill the rest — which meant a run could generate *zero* signals and still exit 0. Now every run records itself in `PipelineRun` (migration `20260802115425_add_pipeline_runs`) and is classified `success` / `partial` / `failed`, with `failed` exiting non-zero so GitHub Actions actually goes red and sends its notification. Ingestion errors per source are counted rather than only logged.
+- Surfaced to the user via `PipelineStatus` on the watchlist — a quiet one-liner when healthy, a coloured banner when the last run failed or only partly succeeded. It also flags **staleness** (no completed run in >96h, allowing for the weekday-only schedule), which is the more dangerous case: a cron that stops firing leaves yesterday's signals looking perfectly current.
+- **`prisma migrate deploy` added to the workflow.** Previously migrations were applied by hand and CI only ran `prisma generate`, so any schema change merged to main would break the cron at runtime with a confusing Prisma error. This was a real latent footgun — two migrations had already been applied manually.
+- Verified: all 5 classification branches tested (clean / no tickers / zero signals / one signal failed / ingestion broke), and all 4 banner states rendered against the real database using synthetic rows, which were then removed. Retry-once is already covered upstream by C6's `signalRetry`.
 - AC: Failed/skipped runs are logged and retried once automatically; repeated failure surfaces to the user and to an internal ops alert.
 
 ---

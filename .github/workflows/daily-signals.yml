@@ -30,6 +30,16 @@ jobs:
       - name: Build packages/shared (Prisma client + compiled dist/)
         run: npm run build --workspace=@financial-adviser/shared
 
+      # D4: without this, a schema change merged to main breaks the cron at
+      # runtime with a confusing Prisma error, because the generated client
+      # expects tables the database doesn't have yet. `migrate deploy` only
+      # applies already-committed migrations -- it never generates new ones or
+      # touches a shadow database, so it's safe to run unattended.
+      - name: Apply database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy --schema packages/shared/prisma/schema.prisma
+
       - name: Run ingestion + signal generation for all tracked tickers
         working-directory: apps/api
         env:
@@ -39,3 +49,17 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
         run: npx tsx src/scripts/run-all.ts
+
+      # Makes a failure impossible to scroll past in the run summary. GitHub
+      # emails the repo owner on a failed scheduled run; this puts the reason
+      # in the summary itself rather than buried in step logs.
+      - name: Report failure
+        if: failure()
+        run: |
+          {
+            echo "## Pipeline run failed"
+            echo ""
+            echo "The daily signal pipeline did not complete successfully."
+            echo "Check the step logs above, and the \`pipeline_runs\` table for"
+            echo "the recorded status and detail of this run."
+          } >> "$GITHUB_STEP_SUMMARY"
