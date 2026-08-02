@@ -6,6 +6,7 @@ import { Technicals } from "../ingestion/twelvedata/technicals";
 const INSIDER_LOOKBACK_DAYS = 90;
 const MAX_INSIDER_FILINGS = 10;
 const MAX_NEWS_ITEMS = 10;
+const MAX_SOCIAL_ITEMS = 10;
 
 // A5's fixed accuracy-tracking horizon. The prompt used to omit this entirely:
 // levels were requested as "grounded in the recent trading range/resistance"
@@ -55,7 +56,7 @@ function formatEarnings(e: EarningsInfo): string {
 }
 
 export interface CitationRecord {
-  type: "filing" | "news";
+  type: "filing" | "news" | "social";
   recordId: string; // the real DB row id, resolved from the short prompt-scoped id below
 }
 
@@ -63,7 +64,7 @@ export interface SourceCoverage {
   filings: boolean;
   price: boolean;
   news: boolean;
-  social: boolean; // B4 not built yet -- always false for now, not a placeholder integration
+  social: boolean; // B4, wired 2026-08-02; false when Reddit is unconfigured or returned nothing
 }
 
 export type PreTagDirection = "bullish" | "bearish" | "neutral";
@@ -109,10 +110,10 @@ function insiderRoleLabel(f: { insiderIsOfficer: boolean; insiderOfficerTitle: s
 
 /**
  * Assembles the structured, size-bounded prompt A5 specifies, from whatever
- * of the 3 built sources (B1 filings, B2 price/technicals, B3 news) have
- * data for this ticker. Social (B4) isn't built yet -- reported as no
- * coverage per A5's Q20 rule, not a placeholder integration point built
- * ahead of the source actually existing.
+ * of the 4 sources (B1 filings, B2 price/technicals, B3 news, B4 social) have
+ * data for this ticker. Any source with nothing is reported as a genuine
+ * coverage gap per A5's Q20 rule, never silently omitted -- social in
+ * particular is absent whenever Reddit credentials aren't configured.
  *
  * `asOfDate` (default: now) restricts every source to data at or before that
  * date -- this is what makes backtesting (2026-07-21) valid rather than
@@ -165,6 +166,28 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     return `  [${id}] ${n.publishedAt.toISOString().slice(0, 10)} | ${n.source} | ${n.headline}${summary}`;
   });
 
+  // --- Social/forum (B4): raw, individually citable, explicitly unverified ---
+  // Ordered by credibility (prominence) rather than recency, because the cap is
+  // 10 items and a ticker can attract dozens of near-identical low-traction
+  // posts in a day; taking the newest would surface noise over what the forum
+  // actually engaged with.
+  const social = await prisma.socialPost.findMany({
+    where: { tickerId: ticker.id, postedAt: { lte: asOfDate } },
+    orderBy: [{ credibilityScore: "desc" }, { postedAt: "desc" }],
+    take: MAX_SOCIAL_ITEMS,
+  });
+
+  const socialLines = social.map((s, i) => {
+    const id = `social_${i}`;
+    citationMap[id] = { type: "social", recordId: s.id };
+    const body = s.body ? ` — ${s.body.slice(0, 240).replace(/\s+/g, " ")}` : "";
+    return (
+      `  [${id}] ${s.postedAt.toISOString().slice(0, 10)} | r/${s.subreddit} | ` +
+      `score ${s.score}, ${s.numComments} comments | prominence ${s.credibilityScore}/100 | ` +
+      `${s.title}${body}`
+    );
+  });
+
   // --- Earnings calendar (B10) ---
   // Backtest-safe: both queries are bounded by asOfDate, so a simulated past
   // date never sees a report that hadn't happened yet. Knowing a FUTURE date is
@@ -196,7 +219,7 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     filings: filings.length > 0,
     price: hasPriceData,
     news: news.length > 0,
-    social: false,
+    social: social.length > 0,
   };
 
   const preTagDirections: PreTagDirections = {
@@ -219,6 +242,7 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     technicals,
     hasPriceData,
     newsLines,
+    socialLines,
     sourceCoverage,
     earningsInfo,
   });
@@ -263,6 +287,7 @@ function buildPromptText(input: {
   technicals: Technicals;
   hasPriceData: boolean;
   newsLines: string[];
+  socialLines: string[];
   sourceCoverage: SourceCoverage;
   earningsInfo: EarningsInfo;
 }): string {
@@ -270,7 +295,7 @@ function buildPromptText(input: {
   if (!input.sourceCoverage.filings) missingSources.push("insider filings");
   if (!input.sourceCoverage.price) missingSources.push("price/technicals");
   if (!input.sourceCoverage.news) missingSources.push("news");
-  missingSources.push("social/forum sentiment (not yet integrated)");
+  if (!input.sourceCoverage.social) missingSources.push("social/forum sentiment");
 
   const coverageNote =
     missingSources.length > 0
@@ -295,6 +320,17 @@ ${formatTechnicals(input.technicals, input.hasPriceData)}
 ## Recent news (raw, read for genuine sentiment)
 ${input.newsLines.length > 0 ? input.newsLines.join("\n") : "  No recent news found."}
 
+## Social/forum chatter (UNVERIFIED speculation — not fact)
+${
+  input.socialLines.length > 0
+    ? `Public Reddit posts. Treat every line below as unverified opinion from anonymous strangers, never as evidence of fact. Do not repeat a claim from here as though it were established; at most note that a claim is circulating, and say where it came from.
+
+The "prominence" figure is NOT a truth score. It reflects which forum a post appeared in and how much traction it got — a heavily upvoted post can be confidently wrong, and often is. Use it only to gauge what the forum is paying attention to, and weigh this whole section well below filings, price and news.
+
+${input.socialLines.join("\n")}`
+    : "  No social/forum data available."
+}
+
 ## Earnings calendar
 ${formatEarnings(input.earningsInfo)}
 
@@ -304,7 +340,7 @@ ${coverageNote}
 ## Output instructions
 **This signal will be evaluated over a ${SIGNAL_HORIZON_DAYS}-day horizon.** Every judgement below -- direction, confidence, and especially the price levels -- must be about what is likely to happen in the next ${SIGNAL_HORIZON_DAYS} days, not about where the stock may go eventually. If the earnings section above shows a report scheduled inside that window, treat it as a material source of two-sided risk: it can invalidate a directional call regardless of how the filings, technicals and news currently read, and your confidence should reflect that uncertainty rather than ignore it.
 
-Determine direction (bullish/bearish/neutral), confidence (0-100), and a rationale. The rationale must acknowledge the source coverage note above, and if direction is neutral, must name the conflicting signals. For citations, cite only the bracketed IDs that actually appear above (e.g. "filing_0", "news_2") -- do not invent an ID that isn't listed.
+Determine direction (bullish/bearish/neutral), confidence (0-100), and a rationale. The rationale must acknowledge the source coverage note above, and if direction is neutral, must name the conflicting signals. For citations, cite only the bracketed IDs that actually appear above (e.g. "filing_0", "news_2", "social_1") -- do not invent an ID that isn't listed.
 
 Also provide entry/target/stop-loss guidance, grounded in the actual current price and recent trading range above -- never invent a price level unrelated to real data:
 - entryGuidance: plain-language guidance on whether current price looks like a reasonable entry, a better level to wait for, or (for bearish/neutral) whether to avoid new entries and what an existing holder should consider.

@@ -4,6 +4,7 @@ import { ingestFilings } from "../ingestion/edgar/ingestFilings";
 import { ingestPrices } from "../ingestion/twelvedata/ingestPrices";
 import { ingestNews } from "../ingestion/finnhub/ingestNews";
 import { ingestEarnings } from "../ingestion/finnhub/ingestEarnings";
+import { ingestSocial } from "../ingestion/reddit/ingestSocial";
 import { generateSignalWithRetry } from "../analysis/signalRetry";
 import { checkAllPendingOutcomes } from "../analysis/signalOutcomes";
 
@@ -94,6 +95,21 @@ async function main() {
 
       console.log("[D1] Ingesting news (B3)...");
       await ingestNews(symbols);
+
+      console.log("[D1] Ingesting social/forum posts (B4)...");
+      const socialResults = await ingestSocial(symbols);
+      for (const r of socialResults) {
+        if (r.status === "error") {
+          // Social is the one optional source -- a failure degrades the prompt
+          // (reported as a coverage gap) rather than invalidating the run.
+          tally.ingestionErrors++;
+          tally.problems.push(`social/${r.symbol}: ${r.error}`);
+          console.error(`[B4] ${r.symbol}: ${r.error}`);
+        }
+      }
+      if (socialResults.some((r) => r.status === "not_configured")) {
+        console.log("[B4] Reddit not configured -- social reported as a coverage gap, not silently skipped.");
+      }
 
       console.log("[D1] Ingesting earnings calendar (B10)...");
       const earningsResults = await ingestEarnings(symbols);

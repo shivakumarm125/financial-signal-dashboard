@@ -13,7 +13,8 @@
     "run:all": "tsx src/scripts/run-all.ts",
     "check:outcomes": "tsx src/scripts/check-outcomes.ts",
     "run:backtest": "tsx src/scripts/run-backtest.ts",
-    "screen:candidates": "tsx src/scripts/screen-candidates.ts"
+    "screen:candidates": "tsx src/scripts/screen-candidates.ts",
+    "ingest:social": "tsx src/scripts/ingest-social.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
