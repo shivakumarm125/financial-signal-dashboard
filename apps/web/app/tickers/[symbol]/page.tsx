@@ -1,6 +1,14 @@
 import { notFound } from "next/navigation";
-import { prisma, computeReachability } from "@financial-adviser/shared";
+import { prisma, computeReachability, getHitRateSummaryForTicker } from "@financial-adviser/shared";
 import { ReachabilityDetail } from "../../components/Reachability";
+import {
+  TrackRecordSummary,
+  IndependenceNote,
+  NoOutcomesYet,
+  OUTCOME_LABELS,
+  outcomeTone,
+  directionColor as signalDirectionColor,
+} from "../../components/TrackRecord";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +62,20 @@ export default async function TickerDetailPage({ params }: { params: { symbol: s
         confidence: latestSignal.confidence,
       })
     : null;
+
+  // Per-ticker track record (B12). The more meaningful unit than the combined
+  // figure on /history: tickers differ enough in how often their 7-day windows
+  // resolve that pooling them describes none of them.
+  const [tickerSummary, tickerSignals] = await Promise.all([
+    getHitRateSummaryForTicker(ticker.id),
+    prisma.signalRecord.findMany({
+      where: { tickerId: ticker.id },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+    }),
+  ]);
+  const tickerPending = tickerSignals.filter((s) => s.outcome === null).length;
+  const hasResolved = tickerSummary.totalEvaluated > 0;
 
   return (
     <main>
@@ -127,6 +149,61 @@ export default async function TickerDetailPage({ params }: { params: { symbol: s
       ) : (
         <p className="mt-6 text-muted">No signal generated yet for this ticker.</p>
       )}
+
+      <section className="mt-8 rounded border border-line bg-white p-6">
+        <div className="flex items-baseline justify-between gap-4">
+          <h3 className="text-xs uppercase tracking-wide text-muted">
+            Track record — {ticker.symbol} only
+          </h3>
+          <a href="/history" className="text-xs text-muted hover:text-ink">
+            All tickers →
+          </a>
+        </div>
+
+        {hasResolved ? (
+          <>
+            <TrackRecordSummary summary={tickerSummary} pending={tickerPending} />
+            <IndependenceNote summary={tickerSummary} />
+          </>
+        ) : (
+          <NoOutcomesYet pending={tickerPending} total={tickerSignals.length} />
+        )}
+
+        {tickerSignals.length > 0 && (
+          <div className="mt-4 overflow-x-auto border-t border-line pt-3">
+            <table className="w-full min-w-[32rem] text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="pb-2 font-normal">Date</th>
+                  <th className="pb-2 font-normal">Signal</th>
+                  <th className="pb-2 text-right font-normal">Target</th>
+                  <th className="pb-2 text-right font-normal">Stop</th>
+                  <th className="pb-2 font-normal">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tickerSignals.map((s) => (
+                  <tr key={s.id} className="border-t border-line align-top">
+                    <td className="py-1.5 whitespace-nowrap text-muted">{fmtDate(s.createdAt)}</td>
+                    <td className={`py-1.5 capitalize ${signalDirectionColor(s.direction)}`}>
+                      {s.direction} <span className="text-muted">{s.confidence}%</span>
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {s.targetPrice ? `$${Number(s.targetPrice).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {s.stopLossPrice ? `$${Number(s.stopLossPrice).toFixed(2)}` : "—"}
+                    </td>
+                    <td className={`py-1.5 ${outcomeTone(s.outcome)}`}>
+                      {OUTCOME_LABELS[s.outcome ?? "pending"] ?? s.outcome}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2">
         <section>

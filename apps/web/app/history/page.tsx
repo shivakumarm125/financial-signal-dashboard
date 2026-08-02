@@ -1,163 +1,43 @@
-import { prisma, getHitRateSummary, getBacktestHitRateSummary } from "@financial-adviser/shared";
-import type { HitRateSummary } from "@financial-adviser/shared";
+import { prisma, getHitRateSummary, getBacktestHitRateSummary, summarizeOutcomes } from "@financial-adviser/shared";
+import {
+  TrackRecordSummary,
+  IndependenceNote,
+  OUTCOME_LABELS,
+  outcomeTone,
+  directionColor,
+  fmtDate,
+} from "../components/TrackRecord";
 
 export const dynamic = "force-dynamic";
 
-function fmtDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function directionColor(direction: string): string {
-  if (direction === "bullish") return "text-bullish";
-  if (direction === "bearish") return "text-bearish";
-  return "text-neutralSignal";
-}
-
-const OUTCOME_LABELS: Record<string, string> = {
-  hit_target: "Target hit",
-  hit_stop: "Stopped out",
-  ambiguous_same_day: "Both levels touched",
-  expired_direction_correct: "Direction right, no level hit",
-  expired_direction_wrong: "Direction wrong, no level hit",
-  no_evaluation: "Not graded",
-  pending: "Pending",
-};
-
-function outcomeTone(outcome: string | null): string {
-  if (outcome === "hit_target" || outcome === "expired_direction_correct") return "text-bullish";
-  if (outcome === "hit_stop" || outcome === "expired_direction_wrong") return "text-bearish";
-  return "text-muted";
-}
-
-function Summary({ summary, pending }: { summary: HitRateSummary; pending?: number }) {
-  const notGraded = summary.counts.no_evaluation ?? 0;
-
-  return (
-    <dl className="mt-4 space-y-2 text-sm">
-      <div className="flex justify-between gap-4 border-t border-line pt-2">
-        <dt className="text-muted">Target / stop reached</dt>
-        <dd>
-          {summary.targetStopEvaluated} evaluated
-          {summary.targetStopEvaluated > 0 && (
-            <>
-              {" — "}
-              <span className="text-bullish">{summary.counts.hit_target ?? 0} hit target</span>,{" "}
-              <span className="text-bearish">{summary.counts.hit_stop ?? 0} stopped out</span> (
-              <span className="font-medium">{summary.targetHitRate}%</span>)
-            </>
-          )}
-        </dd>
-      </div>
-
-      <div className="flex justify-between gap-4 border-t border-line pt-2">
-        <dt className="text-muted">Direction only (neither level hit)</dt>
-        <dd>
-          {summary.directionOnlyEvaluated} evaluated
-          {summary.directionOnlyEvaluated > 0 && (
-            <>
-              {" — "}
-              <span className="text-bullish">{summary.counts.expired_direction_correct ?? 0} correct</span>,{" "}
-              <span className="text-bearish">{summary.counts.expired_direction_wrong ?? 0} wrong</span> (
-              <span className="font-medium">{summary.directionAccuracy}%</span>)
-            </>
-          )}
-        </dd>
-      </div>
-
-      <div className="flex justify-between gap-4 border-t border-line pt-2">
-        <dt className="text-muted">Not graded (neutral or no levels set)</dt>
-        <dd>{notGraded}</dd>
-      </div>
-
-      {pending !== undefined && (
-        <div className="flex justify-between gap-4 border-t border-line pt-2">
-          <dt className="text-muted">Still inside their 7-day horizon</dt>
-          <dd>{pending}</dd>
-        </div>
-      )}
-    </dl>
-  );
-}
-
-/**
- * Below this many independent episodes, a hit rate is noise with a percent sign
- * on it and is labelled as such rather than presented as a track record.
- */
-const MIN_MEANINGFUL_EPISODES = 10;
-
-function pluralDays(n: number): string {
-  return n === 1 ? "1 distinct market day" : `${n} distinct market days`;
-}
-
-/**
- * Keeps the hit rate above from overstating itself, in two separate ways.
- *
- * Overlap: four of the five live target/stop outcomes resolved on the same
- * 2026-07-31 down day — one price move closing four signals is one test, not
- * four. Absolute size: the backtest's "100%" comes from a single outcome, which
- * has no overlap problem at all and is still meaningless. Both need saying.
- */
-function IndependenceNote({ summary }: { summary: HitRateSummary }) {
-  if (summary.targetStopEvaluated === 0) return null;
-
-  const episodes = summary.distinctResolutionDays;
-  const overlapping = summary.targetStopEvaluated > episodes;
-  const tooSmall = episodes < MIN_MEANINGFUL_EPISODES;
-
-  return (
-    <p
-      className={`mt-4 rounded border p-3 text-xs leading-relaxed ${
-        overlapping || tooSmall
-          ? "border-neutralSignal/40 bg-neutralSignal/5 text-ink"
-          : "border-line bg-paper text-muted"
-      }`}
-    >
-      {(overlapping || tooSmall) && (
-        <span className="font-medium">Read that hit rate carefully. </span>
-      )}
-      {overlapping ? (
-        <>
-          Those {summary.targetStopEvaluated} outcomes resolved on only{" "}
-          <span className="font-medium">{pluralDays(episodes)}</span> — several signals were closed
-          out by the same single price move, so they are not independent tests. Treat it as roughly{" "}
-          {episodes} {episodes === 1 ? "episode" : "episodes"}, not {summary.targetStopEvaluated}.
-        </>
-      ) : (
-        <>
-          {summary.targetStopEvaluated === 1
-            ? "This 1 outcome resolved on "
-            : `These ${summary.targetStopEvaluated} outcomes resolved across `}
-          {pluralDays(episodes)}.
-        </>
-      )}
-      {tooSmall && (
-        <>
-          {" "}
-          At {episodes} {episodes === 1 ? "episode" : "episodes"} the percentage carries no real
-          predictive weight — it needs at least {MIN_MEANINGFUL_EPISODES} independent ones before
-          it means anything. Shown for transparency, not as a track record.
-        </>
-      )}
-    </p>
-  );
-}
-
 export default async function HistoryPage() {
   const [signals, backtests, summary, backtestSummary] = await Promise.all([
-    prisma.signalRecord.findMany({
-      orderBy: { createdAt: "desc" },
-      include: { ticker: true },
-    }),
-    prisma.backtestSignal.findMany({
-      orderBy: { asOfDate: "desc" },
-      include: { ticker: true },
-      take: 25,
-    }),
+    prisma.signalRecord.findMany({ orderBy: { createdAt: "desc" }, include: { ticker: true } }),
+    prisma.backtestSignal.findMany({ orderBy: { asOfDate: "desc" }, include: { ticker: true }, take: 25 }),
     getHitRateSummary(),
     getBacktestHitRateSummary(),
   ]);
 
   const pending = signals.filter((s) => s.outcome === null).length;
+
+  // Per-ticker rollup. Computed from the same rows rather than re-querying, so
+  // the parts always add up to the whole shown above them.
+  const bySymbol = new Map<string, typeof signals>();
+  for (const s of signals) {
+    const list = bySymbol.get(s.ticker.symbol) ?? [];
+    list.push(s);
+    bySymbol.set(s.ticker.symbol, list);
+  }
+  const perTicker = [...bySymbol.entries()]
+    .map(([symbol, rows]) => ({
+      symbol,
+      total: rows.length,
+      pending: rows.filter((r) => r.outcome === null).length,
+      summary: summarizeOutcomes(
+        rows.filter((r) => r.outcome !== null).map((r) => ({ outcome: r.outcome!, outcomeDetail: r.outcomeDetail }))
+      ),
+    }))
+    .sort((a, b) => a.symbol.localeCompare(b.symbol));
 
   return (
     <main>
@@ -168,12 +48,71 @@ export default async function HistoryPage() {
       </p>
 
       <section className="mt-8 rounded border border-line bg-white p-6">
-        <h3 className="text-xs uppercase tracking-wide text-muted">Live signals</h3>
-        <Summary summary={summary} pending={pending} />
+        <h3 className="text-xs uppercase tracking-wide text-muted">All tickers combined</h3>
+        <TrackRecordSummary summary={summary} pending={pending} />
         <IndependenceNote summary={summary} />
       </section>
 
       <section className="mt-8">
+        <h3 className="text-xs uppercase tracking-wide text-muted">By ticker</h3>
+        <p className="mt-2 text-xs leading-relaxed text-muted">
+          The combined figure above blends tickers that behave very differently — AAPL resolves only
+          ~39% of its 7-day windows cleanly, COIN ~97% — so it describes none of them precisely.
+          Per-ticker is the more meaningful unit, and the one that answers whether a given ticker is
+          worth continuing to track.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[36rem] text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+                <th className="py-2 font-normal">Ticker</th>
+                <th className="py-2 text-right font-normal">Signals</th>
+                <th className="py-2 text-right font-normal">Target/stop</th>
+                <th className="py-2 text-right font-normal">Hit rate</th>
+                <th className="py-2 text-right font-normal">Episodes</th>
+                <th className="py-2 text-right font-normal">Pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              {perTicker.map((t) => (
+                <tr key={t.symbol} className="border-b border-line">
+                  <td className="py-2">
+                    <a href={`/tickers/${t.symbol}`} className="hover:underline">
+                      {t.symbol}
+                    </a>
+                  </td>
+                  <td className="py-2 text-right">{t.total}</td>
+                  <td className="py-2 text-right">{t.summary.targetStopEvaluated}</td>
+                  <td className="py-2 text-right">
+                    {t.summary.targetHitRate === null ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <>
+                        {t.summary.targetHitRate}%
+                        {t.summary.distinctResolutionDays < 10 && (
+                          <span className="text-neutralSignal" title="Too few independent episodes to be meaningful">
+                            {" "}
+                            *
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </td>
+                  <td className="py-2 text-right">{t.summary.distinctResolutionDays || "—"}</td>
+                  <td className="py-2 text-right">{t.pending}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          <span className="text-neutralSignal">*</span> fewer than 10 independent episodes — not yet
+          a meaningful rate. &ldquo;Episodes&rdquo; counts distinct market days on which outcomes
+          resolved, not signals; several signals closed by one price move are one test.
+        </p>
+      </section>
+
+      <section className="mt-10">
         <h3 className="text-xs uppercase tracking-wide text-muted">Every signal</h3>
         {signals.length === 0 ? (
           <p className="mt-2 text-sm text-muted">No signals published yet.</p>
@@ -193,15 +132,14 @@ export default async function HistoryPage() {
               <tbody>
                 {signals.map((s) => (
                   <tr key={s.id} className="border-b border-line align-top">
-                    <td className="py-2 text-muted whitespace-nowrap">{fmtDate(s.createdAt)}</td>
+                    <td className="py-2 whitespace-nowrap text-muted">{fmtDate(s.createdAt)}</td>
                     <td className="py-2">
                       <a href={`/tickers/${s.ticker.symbol}`} className="hover:underline">
                         {s.ticker.symbol}
                       </a>
                     </td>
                     <td className={`py-2 capitalize ${directionColor(s.direction)}`}>
-                      {s.direction}{" "}
-                      <span className="text-muted">{s.confidence}%</span>
+                      {s.direction} <span className="text-muted">{s.confidence}%</span>
                     </td>
                     <td className="py-2 text-right">
                       {s.targetPrice ? `$${Number(s.targetPrice).toFixed(2)}` : "—"}
@@ -211,9 +149,7 @@ export default async function HistoryPage() {
                     </td>
                     <td className={`py-2 ${outcomeTone(s.outcome)}`}>
                       {OUTCOME_LABELS[s.outcome ?? "pending"] ?? s.outcome}
-                      {s.outcomeDetail && (
-                        <div className="text-xs text-muted">{s.outcomeDetail}</div>
-                      )}
+                      {s.outcomeDetail && <div className="text-xs text-muted">{s.outcomeDetail}</div>}
                     </td>
                   </tr>
                 ))}
@@ -230,7 +166,7 @@ export default async function HistoryPage() {
           Kept separate from the live record above — these were never published to anyone, and the
           sample has known correlation problems.
         </p>
-        <Summary summary={backtestSummary} />
+        <TrackRecordSummary summary={backtestSummary} />
         <IndependenceNote summary={backtestSummary} />
 
         {backtests.length > 0 && (

@@ -87,8 +87,30 @@ export async function getHitRateSummary(): Promise<HitRateSummary> {
   return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome!, outcomeDetail: s.outcomeDetail })));
 }
 
+/**
+ * Per-ticker track record.
+ *
+ * This is the more meaningful unit, and not only because of sample size.
+ * Tickers behave differently enough that pooling them describes none of them:
+ * AAPL resolves only 38.8% of its 7-day windows cleanly while COIN resolves
+ * 96.8% (see B9's screening). A blended hit rate mixes populations, so it stays
+ * the least informative view no matter how much data accumulates. It is also
+ * the number behind a real decision -- whether a given ticker is worth
+ * continuing to track.
+ */
+export async function getHitRateSummaryForTicker(tickerId: string): Promise<HitRateSummary> {
+  const evaluated = await prisma.signalRecord.findMany({ where: { tickerId, outcome: { not: null } } });
+  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome!, outcomeDetail: s.outcomeDetail })));
+}
+
 /** Same summary shape, but for backtest results (a separate table -- see BacktestSignal). */
 export async function getBacktestHitRateSummary(): Promise<HitRateSummary> {
   const evaluated = await prisma.backtestSignal.findMany();
+  return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome, outcomeDetail: s.outcomeDetail })));
+}
+
+/** Per-ticker backtest summary, kept separate from live signals for the same reason the global one is. */
+export async function getBacktestHitRateSummaryForTicker(tickerId: string): Promise<HitRateSummary> {
+  const evaluated = await prisma.backtestSignal.findMany({ where: { tickerId } });
   return summarizeOutcomes(evaluated.map((s) => ({ outcome: s.outcome, outcomeDetail: s.outcomeDetail })));
 }
