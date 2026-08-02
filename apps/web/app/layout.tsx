@@ -17,9 +17,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <h1 className="text-2xl font-medium">
                 <a href="/">Watchlist</a>
               </h1>
-              <a href="/history" className="text-sm text-muted hover:text-ink">
-                Track record
-              </a>
+              <nav className="flex gap-4 text-sm text-muted">
+                <a href="/history" className="hover:text-ink">
+                  Track record
+                </a>
+                <a href="/manage" className="hover:text-ink">
+                  Manage
+                </a>
+              </nav>
             </div>
           </header>
           {children}

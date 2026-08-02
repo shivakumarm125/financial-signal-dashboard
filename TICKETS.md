@@ -193,7 +193,13 @@ Tag legend: **BA** · **BE** (Backend Dev) · **FE** (Frontend Dev) · **UX** (U
 
 ## Epic F — Dashboard UI `[FE + UX]`
 
-**F1. Watchlist management screen** — P0 `[FE]`
+**F1. Watchlist management screen** — P0 `[FE]` — ✅ **Built**, verified against real data (2026-08-02)
+- AC: Add/remove tickers, see at-a-glance last-run status per ticker.
+- `/manage` — add form, per-ticker data-status table (price bars, filings, news, earnings, signals, latest bar date, last signal date), and a remove control per row. Enforces A1's locked 10-ticker cap, which nothing had enforced until now.
+- **Adding deliberately ingests nothing.** The web app holds only `DATABASE_URL` and no provider API keys — a boundary worth keeping — and a first EDGAR backfill runs tens of minutes, far past any serverless request. `run-all.ts` already ingests every `Ticker` row that exists, so creating the row *is* the enrolment and the next scheduled run populates it. The tradeoff is that symbol *validity* can't be confirmed at add time, only its shape; a bad symbol fails ingestion on the next run, which D4 now records as an ingestion error and surfaces rather than swallowing. The UI states this rather than implying data appears immediately.
+- **Removal is an explicit transaction, not a schema cascade.** `deleteTickerCascade` lives in `packages/shared` (not in the server action) specifically so its foreign-key ordering can be tested directly — clicking Remove on a real ticker is the worst possible way to discover that ordering is wrong. It returns real counts so the confirmation tells the user what a year of history actually cost. Requires typing the symbol to confirm; there is no undo.
+- Verified against the real database: the cascade was run against a throwaway ticker seeded with a row in *every* child table (including `SignalCitation`, which references signals rather than the ticker) and left zero orphans; symbol validation passed 11/11 cases including `BRK.B`, `RDS-A` and injection-shaped input; add/duplicate-detect/remove round-trip returned the ticker count to its starting value.
+- Known gap: `deleteTickerCascade` has no cascade to fall back on, so any future model with a `tickerId` must be added to it or removal fails with a foreign-key violation. Called out in the function's own docstring.
 - AC: Add/remove tickers, see at-a-glance last-run status per ticker.
 
 **F2. Prediction card component** — P0 `[FE]`
