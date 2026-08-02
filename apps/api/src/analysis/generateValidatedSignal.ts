@@ -1,7 +1,6 @@
 import { assembleContextForTicker } from "./promptAssembly";
 import { generateSignal, Signal } from "./claudeClient";
 import { validateCitations, validateTradeLevels, applyConfidenceCapping } from "./signalValidation";
-import { recordUsage } from "./costTracking";
 import { persistSignal } from "./signalHistory";
 
 // Retry once on a malformed response (invalid citation ID) -- per C3's AC,
@@ -27,15 +26,14 @@ export async function generateValidatedSignal(symbol: string): Promise<Validated
   let lastFailureReason = "";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const result = await generateSignal(context.promptText);
+    const result = await generateSignal(context.promptText, { tickerId: context.tickerId, purpose: "signal" });
 
     if (result.status !== "ok") {
       return { status: result.status, tickerSymbol: symbol, message: result.message };
     }
 
-    // Record real usage/cost (C4) for every real call, valid or not -- an
-    // invalid-citation retry still spent real tokens and should count.
-    await recordUsage(context.tickerId, result.usage);
+    // Usage is recorded inside generateSignal itself, so a retry after an
+    // invalid citation is counted too -- it spent real tokens either way.
 
     const citationsOk = validateCitations(result.signal.citations, context.citationMap);
     const tradeLevelsOk = validateTradeLevels(

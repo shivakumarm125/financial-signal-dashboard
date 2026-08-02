@@ -292,15 +292,26 @@ model NewsIngestionState {
 // pattern as C2's single env-var API key; scoping to per-user is a later,
 // mechanical change once accounts exist.
 model UsageRecord {
-  id               String   @id @default(uuid())
-  ticker           Ticker   @relation(fields: [tickerId], references: [id])
-  tickerId         String
+  id     String  @id @default(uuid())
+  ticker Ticker? @relation(fields: [tickerId], references: [id])
+  // Nullable since 2026-08-02: recording moved into claudeClient so EVERY call
+  // is counted, including ad-hoc and debugging ones that have no ticker
+  // context. Dropping a real charge for want of a foreign key would defeat the
+  // point of tracking cost at all.
+  tickerId String?
+
+  /// "signal" | "backtest" | "adhoc". Backtests are real spend but not live
+  /// operating cost, and blending them makes the daily figure look worse than
+  /// it is. A 10-point backtest is 10 calls.
+  purpose String @default("signal")
+
   inputTokens      Int
   outputTokens     Int
   estimatedCostUsd Decimal  @db.Decimal(10, 6)
   createdAt        DateTime @default(now())
 
   @@index([createdAt])
+  @@index([purpose])
   @@map("usage_records")
 }
 

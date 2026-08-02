@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { recordUsage, type UsagePurpose } from "./usageRecording";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { CLAUDE_API_KEY, CLAUDE_MODEL } from "./config";
@@ -65,7 +66,10 @@ function classifyError(err: unknown): ClaudeCallResult {
  * A5's task (detecting genuine signal conflicts) benefits from full reasoning
  * rather than trading it away for determinism we can't achieve anyway.
  */
-export async function generateSignal(promptText: string): Promise<ClaudeCallResult> {
+export async function generateSignal(
+  promptText: string,
+  opts: { tickerId?: string | null; purpose?: UsagePurpose } = {}
+): Promise<ClaudeCallResult> {
   try {
     const response = await client.messages.parse({
       model: CLAUDE_MODEL,
@@ -74,15 +78,27 @@ export async function generateSignal(promptText: string): Promise<ClaudeCallResu
       output_config: { format: zodOutputFormat(SignalSchema) },
     });
 
+    const usage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
+
+    // Recorded HERE rather than in a caller, so no path can spend money without
+    // it being counted. This also fires when parsing fails below: the tokens
+    // were still bought and billed, and a failed call that costs money and
+    // records nothing is exactly the blind spot this moved to fix.
+    //
+    // Deliberately never throws -- a recording failure must not turn a
+    // successful, already-paid-for generation into an error.
+    await recordUsage(usage, { tickerId: opts.tickerId, purpose: opts.purpose }).catch((e) =>
+      console.error("[C4] Failed to record usage (call still succeeded):", e instanceof Error ? e.message : e)
+    );
+
     if (!response.parsed_output) {
       return { status: "other_error", message: "Structured output parsing returned null" };
     }
 
-    return {
-      status: "ok",
-      signal: response.parsed_output,
-      usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
-    };
+    return { status: "ok", signal: response.parsed_output, usage };
   } catch (err) {
     return classifyError(err);
   }
@@ -114,6 +130,15 @@ export async function validateApiKey(): Promise<ClaudeCallResult> {
       max_tokens: 16,
       messages: [{ role: "user", content: "Reply with only the word OK." }],
     });
+    // Tiny (16 max_tokens) but still billed, and "no path spends money without
+    // being counted" only holds if it applies to the small paths too.
+    await recordUsage(
+      { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+      { purpose: "adhoc" }
+    ).catch(() => {
+      /* key validation must not fail because bookkeeping did */
+    });
+
     const text = response.content.find((b) => b.type === "text")?.text ?? "";
     return {
       status: "ok",

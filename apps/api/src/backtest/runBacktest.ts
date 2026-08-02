@@ -63,7 +63,7 @@ export async function runBacktestPoint(symbol: string, asOfDate: Date): Promise<
 
   let lastFailureReason = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const result = await generateSignal(context.promptText);
+    const result = await generateSignal(context.promptText, { tickerId: ticker.id, purpose: "backtest" });
     if (result.status !== "ok") {
       return { asOfDate: dateStr, status: "error", reason: `${result.status}: ${result.message}` };
     }
