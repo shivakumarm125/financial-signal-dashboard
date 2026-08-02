@@ -21,9 +21,9 @@ This product is capped at **~10 known friends-and-family users**, invite-only, f
 
 ## Data-use notice (shown once, e.g. in onboarding or an "about the data" panel)
 
-> This tool pulls price/chart data (Alpha Vantage/Twelve Data), financial news (Finnhub, with NewsAPI as fallback), public SEC insider filings (Form 4 via EDGAR), and public Reddit posts (r/wallstreetbets, r/stocks) to generate each signal. Social/forum content is unverified speculation, not fact, and is always labeled as such.
+> This tool pulls price/chart data (Alpha Vantage/Twelve Data), financial news (Finnhub, with NewsAPI as fallback), public SEC insider filings (Form 4 via EDGAR), and public StockTwits posts to generate each signal. Social/forum content is unverified speculation, not fact, and is always labeled as such.
 >
-> Reddit's data is used under its free-tier API terms, on the working assumption that a small, free, invite-only tool qualifies as non-commercial use. That assumption is tracked, not formally legally verified — see A2's risk notes — and will be re-checked if this product ever takes on billing or grows beyond friends and family.
+> StockTwits data is used via its public streams API, on the working assumption that a small, free, invite-only tool qualifies as non-commercial use. That assumption is tracked, not formally legally verified — see A2's risk notes — and will be re-checked if this product ever takes on billing or grows beyond friends and family. (Reddit was the original source; it was dropped on 2026-08-02 when Reddit closed self-serve API access. The assumption above is unchanged in substance and simply now attaches to StockTwits.)
 
 ## Public-data confirmation (folds in A8's regulatory boundary check)
 
@@ -32,7 +32,7 @@ All four ingested sources are public by construction, not by review:
 - **SEC Form 4** — legally mandated public disclosure, pulled via SEC EDGAR's own public API.
 - **Financial news** — public news APIs (Finnhub, NewsAPI).
 - **Price/chart data** — public market data APIs (Alpha Vantage/Twelve Data).
-- **Social/forum speculation** — public Reddit posts, explicitly labeled "unverified sentiment," never presented as fact.
+- **Social/forum speculation** — public StockTwits posts, explicitly labeled "unverified sentiment," never presented as fact. Stored with an author-standing score that reflects follower count and account age, never accuracy.
 
 There is no ingestion path (Epic B) for non-public, insider, or informally-obtained information — no formal sign-off checklist is needed at this scale; this paragraph *is* the check.
 

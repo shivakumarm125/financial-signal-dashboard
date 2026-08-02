@@ -169,10 +169,16 @@ model PipelineRun {
 // Social/forum speculation (B4) -- the fourth data source from A1, and the one
 // every signal rationale has been reporting as missing since C1 shipped.
 //
-// A3's stated position governs this: Reddit's free-tier API, on the tracked
-// working assumption that a small, free, invite-only tool is non-commercial
-// use. Not formally legally verified; to be re-checked if this ever takes on
-// billing or grows beyond friends and family.
+// VENDOR: StockTwits, not Reddit. A2 originally picked Reddit and flagged that
+// its API terms were tightening; that risk materialised on 2026-08-02, when
+// Reddit's app creation became gated behind a Responsible Builder Policy review
+// that blocks self-serve access. StockTwits' public API needs no registration,
+// is cashtag-native (every message is tied to a symbol rather than found by
+// keyword search), and exposes real author reputation. A2/A3 updated to match.
+//
+// A3's tracked non-commercial-use assumption carries over to StockTwits
+// unchanged in substance: a small, free, invite-only tool, not formally legally
+// verified, to be re-checked if this ever takes on billing or grows.
 //
 // `isUnverified` is hardcoded true and never written as anything else. A1 and
 // A3 both require social content to be labelled unverified speculation rather
@@ -183,21 +189,31 @@ model SocialPost {
   ticker   Ticker @relation(fields: [tickerId], references: [id])
   tickerId String
 
-  externalId String // Reddit fullname, e.g. "t3_abc123"
-  platform   String @default("reddit")
-  subreddit  String
+  externalId String // StockTwits message id, stringified
+  platform   String @default("stocktwits")
   author     String?
 
-  title       String
-  body        String?
-  url         String
-  score       Int // net upvotes
-  numComments Int
-  postedAt    DateTime
+  // Author reputation, captured at ingest. These are what make the credibility
+  // score mean something: followers and account age are standing reputation,
+  // unlike upvotes on a single post, which only measure one post's traction.
+  authorFollowers Int?
+  authorPostCount Int?
+  authorJoinedAt  DateTime?
+  authorOfficial  Boolean @default(false)
 
-  /// 0-100. See scoreCredibility() -- this measures PROMINENCE (which forum,
-  /// how much traction), NOT whether the claim is true. Nothing observable in a
-  /// Reddit post establishes accuracy, and the prompt says so explicitly.
+  body String
+  url  String
+
+  /// The poster's OWN Bullish/Bearish tag where they set one. Self-declared, so
+  /// it says what they claim to believe -- never that they are right.
+  declaredSentiment String?
+
+  postedAt DateTime
+
+  /// 0-100. See scoreCredibility() -- measures the AUTHOR'S STANDING on the
+  /// platform, NOT whether their claim is true. Nothing observable about a post
+  /// establishes accuracy; a widely-followed account can be confidently wrong.
+  /// The prompt says so explicitly.
   credibilityScore Int
   /// Human-readable breakdown of how the score above was reached.
   credibilityBasis String

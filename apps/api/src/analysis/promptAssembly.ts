@@ -64,7 +64,7 @@ export interface SourceCoverage {
   filings: boolean;
   price: boolean;
   news: boolean;
-  social: boolean; // B4, wired 2026-08-02; false when Reddit is unconfigured or returned nothing
+  social: boolean; // B4 (StockTwits), wired 2026-08-02; false when the ticker has no posts stored
 }
 
 export type PreTagDirection = "bullish" | "bearish" | "neutral";
@@ -112,8 +112,7 @@ function insiderRoleLabel(f: { insiderIsOfficer: boolean; insiderOfficerTitle: s
  * Assembles the structured, size-bounded prompt A5 specifies, from whatever
  * of the 4 sources (B1 filings, B2 price/technicals, B3 news, B4 social) have
  * data for this ticker. Any source with nothing is reported as a genuine
- * coverage gap per A5's Q20 rule, never silently omitted -- social in
- * particular is absent whenever Reddit credentials aren't configured.
+ * coverage gap per A5's Q20 rule, never silently omitted.
  *
  * `asOfDate` (default: now) restricts every source to data at or before that
  * date -- this is what makes backtesting (2026-07-21) valid rather than
@@ -167,10 +166,9 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
   });
 
   // --- Social/forum (B4): raw, individually citable, explicitly unverified ---
-  // Ordered by credibility (prominence) rather than recency, because the cap is
-  // 10 items and a ticker can attract dozens of near-identical low-traction
-  // posts in a day; taking the newest would surface noise over what the forum
-  // actually engaged with.
+  // Ordered by author standing rather than recency: the cap is 10 items and a
+  // busy cashtag produces dozens of one-line posts an hour, so taking the
+  // newest would fill the prompt with noise from brand-new accounts.
   const social = await prisma.socialPost.findMany({
     where: { tickerId: ticker.id, postedAt: { lte: asOfDate } },
     orderBy: [{ credibilityScore: "desc" }, { postedAt: "desc" }],
@@ -180,13 +178,20 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
   const socialLines = social.map((s, i) => {
     const id = `social_${i}`;
     citationMap[id] = { type: "social", recordId: s.id };
-    const body = s.body ? ` — ${s.body.slice(0, 240).replace(/\s+/g, " ")}` : "";
+    const sentiment = s.declaredSentiment ? ` | poster tagged it ${s.declaredSentiment}` : "";
+    const followers = s.authorFollowers !== null ? `${s.authorFollowers} followers` : "unknown reach";
     return (
-      `  [${id}] ${s.postedAt.toISOString().slice(0, 10)} | r/${s.subreddit} | ` +
-      `score ${s.score}, ${s.numComments} comments | prominence ${s.credibilityScore}/100 | ` +
-      `${s.title}${body}`
+      `  [${id}] ${s.postedAt.toISOString().slice(0, 10)} | @${s.author ?? "unknown"} (${followers}) | ` +
+      `standing ${s.credibilityScore}/100${sentiment} | ` +
+      s.body.slice(0, 260).replace(/\s+/g, " ")
     );
   });
+
+  // Aggregate of what the forum is claiming, so the model can see the balance
+  // without having to count lines. Self-declared tags only -- a poster saying
+  // "Bullish" is a statement of position, not evidence.
+  const declaredBullish = social.filter((s) => s.declaredSentiment === "Bullish").length;
+  const declaredBearish = social.filter((s) => s.declaredSentiment === "Bearish").length;
 
   // --- Earnings calendar (B10) ---
   // Backtest-safe: both queries are bounded by asOfDate, so a simulated past
@@ -243,6 +248,8 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     hasPriceData,
     newsLines,
     socialLines,
+    declaredBullish,
+    declaredBearish,
     sourceCoverage,
     earningsInfo,
   });
@@ -288,6 +295,8 @@ function buildPromptText(input: {
   hasPriceData: boolean;
   newsLines: string[];
   socialLines: string[];
+  declaredBullish: number;
+  declaredBearish: number;
   sourceCoverage: SourceCoverage;
   earningsInfo: EarningsInfo;
 }): string {
@@ -323,9 +332,11 @@ ${input.newsLines.length > 0 ? input.newsLines.join("\n") : "  No recent news fo
 ## Social/forum chatter (UNVERIFIED speculation — not fact)
 ${
   input.socialLines.length > 0
-    ? `Public Reddit posts. Treat every line below as unverified opinion from anonymous strangers, never as evidence of fact. Do not repeat a claim from here as though it were established; at most note that a claim is circulating, and say where it came from.
+    ? `Public StockTwits posts. Treat every line below as unverified opinion from anonymous retail traders, never as evidence of fact. Do not repeat a claim from here as though it were established; at most note that a claim is circulating, and say where it came from.
 
-The "prominence" figure is NOT a truth score. It reflects which forum a post appeared in and how much traction it got — a heavily upvoted post can be confidently wrong, and often is. Use it only to gauge what the forum is paying attention to, and weigh this whole section well below filings, price and news.
+Self-declared sentiment in this sample: ${input.declaredBullish} tagged Bullish, ${input.declaredBearish} tagged Bearish (posters tag their own messages; many don't). This is what people say they believe, not evidence they are right — retail sentiment is frequently strongest at exactly the wrong moment.
+
+The "standing" figure is NOT a truth score. It reflects the poster's follower count, account age and history — a widely-followed, long-established account can be confidently wrong. Use it only to judge whether a view is coming from an established account or a brand-new one, and weigh this whole section well below filings, price and news.
 
 ${input.socialLines.join("\n")}`
     : "  No social/forum data available."

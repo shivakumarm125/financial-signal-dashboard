@@ -4,7 +4,7 @@ import { ingestFilings } from "../ingestion/edgar/ingestFilings";
 import { ingestPrices } from "../ingestion/twelvedata/ingestPrices";
 import { ingestNews } from "../ingestion/finnhub/ingestNews";
 import { ingestEarnings } from "../ingestion/finnhub/ingestEarnings";
-import { ingestSocial } from "../ingestion/reddit/ingestSocial";
+import { ingestSocial } from "../ingestion/stocktwits/ingestSocial";
 import { generateSignalWithRetry } from "../analysis/signalRetry";
 import { checkAllPendingOutcomes } from "../analysis/signalOutcomes";
 
@@ -107,10 +107,6 @@ async function main() {
           console.error(`[B4] ${r.symbol}: ${r.error}`);
         }
       }
-      if (socialResults.some((r) => r.status === "not_configured")) {
-        console.log("[B4] Reddit not configured -- social reported as a coverage gap, not silently skipped.");
-      }
-
       console.log("[D1] Ingesting earnings calendar (B10)...");
       const earningsResults = await ingestEarnings(symbols);
       for (const r of earningsResults) {

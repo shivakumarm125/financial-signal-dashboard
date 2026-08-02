@@ -1,28 +1,24 @@
 import { prisma } from "@financial-adviser/shared";
-import { searchTickerMentions, scoreCredibility } from "./socialClient";
-import { REDDIT_CONFIGURED } from "./config";
+import { fetchTickerMessages, scoreCredibility } from "./socialClient";
 
 export interface SocialIngestResult {
   symbol: string;
-  status: "ok" | "not_configured" | "error";
+  status: "ok" | "not_found" | "error";
   postsStored: number;
+  bullish: number;
+  bearish: number;
   error?: string;
 }
 
 /**
- * Ingests recent Reddit mentions for one ticker (B4).
+ * Ingests recent StockTwits messages for one ticker (B4).
  *
- * Dedupes on Reddit's own fullname (t3_xxx), like B3 does with Finnhub's
- * article id. Re-upserts existing posts rather than skipping them, because
- * score and comment count move after publication -- a two-day-old post's
- * engagement is genuinely different data from what it was at first sight, and
- * the credibility score derives from it.
+ * Deduped on StockTwits' own message id. Re-upserts rather than skipping, since
+ * author reputation moves between runs and the credibility score derives from
+ * it -- a post from an account that has since gained followers is genuinely
+ * different data from what was first stored.
  */
 export async function ingestSocialForTicker(symbol: string): Promise<SocialIngestResult> {
-  if (!REDDIT_CONFIGURED) {
-    return { symbol, status: "not_configured", postsStored: 0 };
-  }
-
   const ticker = await prisma.ticker.upsert({
     where: { symbol: symbol.toUpperCase() },
     update: {},
@@ -30,18 +26,25 @@ export async function ingestSocialForTicker(symbol: string): Promise<SocialInges
   });
 
   try {
-    const posts = await searchTickerMentions(symbol);
+    const posts = await fetchTickerMessages(symbol);
+
+    let bullish = 0;
+    let bearish = 0;
 
     for (const post of posts) {
+      if (post.declaredSentiment === "Bullish") bullish++;
+      if (post.declaredSentiment === "Bearish") bearish++;
+
       const { score, basis } = scoreCredibility(post);
       const data = {
-        subreddit: post.subreddit,
         author: post.author,
-        title: post.title,
+        authorFollowers: post.authorFollowers,
+        authorPostCount: post.authorPostCount,
+        authorJoinedAt: post.authorJoinedAt,
+        authorOfficial: post.authorOfficial,
         body: post.body,
         url: post.url,
-        score: post.score,
-        numComments: post.numComments,
+        declaredSentiment: post.declaredSentiment,
         postedAt: post.postedAt,
         credibilityScore: score,
         credibilityBasis: basis,
@@ -53,7 +56,7 @@ export async function ingestSocialForTicker(symbol: string): Promise<SocialInges
       await prisma.socialPost.upsert({
         where: { tickerId_externalId: { tickerId: ticker.id, externalId: post.externalId } },
         update: data,
-        create: { tickerId: ticker.id, externalId: post.externalId, platform: "reddit", ...data },
+        create: { tickerId: ticker.id, externalId: post.externalId, platform: "stocktwits", ...data },
       });
     }
 
@@ -63,14 +66,14 @@ export async function ingestSocialForTicker(symbol: string): Promise<SocialInges
       create: { tickerId: ticker.id, lastSyncedAt: new Date() },
     });
 
-    return { symbol, status: "ok", postsStored: posts.length };
+    return { symbol, status: "ok", postsStored: posts.length, bullish, bearish };
   } catch (err) {
-    return {
-      symbol,
-      status: "error",
-      postsStored: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    // An unlisted symbol is an expected outcome, not a broken integration.
+    if (message.includes("404")) {
+      return { symbol, status: "not_found", postsStored: 0, bullish: 0, bearish: 0, error: message };
+    }
+    return { symbol, status: "error", postsStored: 0, bullish: 0, bearish: 0, error: message };
   }
 }
 
