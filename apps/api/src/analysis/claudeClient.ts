@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { stripLoneSurrogates } from "@financial-adviser/shared";
 import { recordUsage, type UsagePurpose } from "./usageRecording";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -70,11 +71,17 @@ export async function generateSignal(
   promptText: string,
   opts: { tickerId?: string | null; purpose?: UsagePurpose } = {}
 ): Promise<ClaudeCallResult> {
+  // A single unpaired surrogate anywhere in the prompt makes the whole request
+  // body invalid JSON, and the API rejects the entire call with a 400 that
+  // names neither the ticker nor the character (see packages/shared/src/text.ts).
+  // Sanitising here means no caller can poison a request by accident.
+  const safePrompt = stripLoneSurrogates(promptText);
+
   try {
     const response = await client.messages.parse({
       model: CLAUDE_MODEL,
       max_tokens: 2048,
-      messages: [{ role: "user", content: promptText }],
+      messages: [{ role: "user", content: safePrompt }],
       output_config: { format: zodOutputFormat(SignalSchema) },
     });
 
@@ -112,7 +119,7 @@ export async function generateSignal(
 export async function countPromptTokens(promptText: string): Promise<number> {
   const result = await client.messages.countTokens({
     model: CLAUDE_MODEL,
-    messages: [{ role: "user", content: promptText }],
+    messages: [{ role: "user", content: stripLoneSurrogates(promptText) }],
   });
   return result.input_tokens;
 }

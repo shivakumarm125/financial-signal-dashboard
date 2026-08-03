@@ -1,3 +1,4 @@
+import { truncateSafely } from "@financial-adviser/shared";
 import { stocktwitsFetch } from "./httpClient";
 import { STOCKTWITS_BASE_URL, MAX_POSTS_PER_TICKER, SOCIAL_LOOKBACK_DAYS } from "./config";
 
@@ -68,7 +69,7 @@ export async function fetchTickerMessages(symbol: string): Promise<RawSocialPost
       authorPostCount: user?.ideas ?? null,
       authorJoinedAt: user?.join_date ? new Date(user.join_date + "T00:00:00.000Z") : null,
       authorOfficial: Boolean(user?.official),
-      body: m.body.slice(0, 2000),
+      body: truncateSafely(m.body, 2000),
       url: username ? `https://stocktwits.com/${username}/message/${m.id}` : `https://stocktwits.com/message/${m.id}`,
       // Only present when the poster tagged their own message.
       declaredSentiment: m.entities?.sentiment?.basic ?? null,

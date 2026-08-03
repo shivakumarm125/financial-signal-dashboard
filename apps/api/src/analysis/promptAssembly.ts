@@ -1,4 +1,4 @@
-import { prisma } from "@financial-adviser/shared";
+import { prisma, truncateSafely } from "@financial-adviser/shared";
 import { getStoredTechnicals } from "../ingestion/twelvedata/ingestPrices";
 import { Technicals } from "../ingestion/twelvedata/technicals";
 
@@ -183,7 +183,7 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
     return (
       `  [${id}] ${s.postedAt.toISOString().slice(0, 10)} | @${s.author ?? "unknown"} (${followers}) | ` +
       `standing ${s.credibilityScore}/100${sentiment} | ` +
-      s.body.slice(0, 260).replace(/\s+/g, " ")
+      truncateSafely(s.body, 260).replace(/\s+/g, " ")
     );
   });
 

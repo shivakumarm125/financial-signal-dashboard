@@ -122,11 +122,17 @@ async function main() {
         const outcome = await generateSignalWithRetry(symbol);
         if (outcome.status === "ok") {
           tally.signalsGenerated++;
+          console.log(`[D1] ${symbol}: ok`);
         } else {
           tally.signalsFailed++;
-          tally.problems.push(`signal/${symbol}: ${outcome.status}`);
+          // The raw message used to be dropped on the floor, so a failure read
+          // only as e.g. "non_retryable_error" -- enough to know something
+          // broke, useless for knowing what. Diagnosing one meant reproducing
+          // it locally against a live API. Keep the underlying cause.
+          tally.problems.push(`signal/${symbol}: ${outcome.status} -- ${outcome.rawMessage}`);
+          console.error(`[D1] ${symbol}: ${outcome.status}`);
+          console.error(`     cause: ${outcome.rawMessage}`);
         }
-        console.log(`[D1] ${symbol}: ${outcome.status}`);
       }
 
       console.log("[C5] Checking outcomes of past signals against real price data...");
