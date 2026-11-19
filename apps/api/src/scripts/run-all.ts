@@ -5,8 +5,15 @@ import { ingestPrices } from "../ingestion/twelvedata/ingestPrices";
 import { ingestNews } from "../ingestion/finnhub/ingestNews";
 import { ingestEarnings } from "../ingestion/finnhub/ingestEarnings";
 import { ingestSocial } from "../ingestion/stocktwits/ingestSocial";
-import { generateSignalWithRetry } from "../analysis/signalRetry";
+import { appendFileSync } from "node:fs";
+import { generateSignalsWithRetry } from "../analysis/signalRetry";
 import { checkAllPendingOutcomes } from "../analysis/signalOutcomes";
+
+/** Appends markdown to the GitHub Actions run summary; a no-op when run locally. */
+function writeStepSummary(markdown: string): void {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (file) appendFileSync(file, markdown + "\n");
+}
 
 /**
  * D1's scheduled entry point: ingest all built sources, then generate a signal,
@@ -117,9 +124,10 @@ async function main() {
         }
       }
 
-      console.log("[D1] Generating signals (C1-C6)...");
-      for (const symbol of symbols) {
-        const outcome = await generateSignalWithRetry(symbol);
+      console.log("[D1] Generating signals (C1-C6, one batch)...");
+      const outcomes = await generateSignalsWithRetry(symbols);
+      for (const outcome of outcomes) {
+        const symbol = outcome.tickerSymbol;
         if (outcome.status === "ok") {
           tally.signalsGenerated++;
           console.log(`[D1] ${symbol}: ok`);
@@ -133,6 +141,21 @@ async function main() {
           console.error(`[D1] ${symbol}: ${outcome.status}`);
           console.error(`     cause: ${outcome.rawMessage}`);
         }
+      }
+
+      // A dead key or an empty balance fails every ticker identically, and it
+      // went unnoticed for two months (2026-09-16 to 11-19) as a generic red
+      // run. Say exactly what to do, at the top of the run summary. Ingestion
+      // above still ran on purpose: that data is what lets the gap be
+      // backfilled once Claude is reachable again.
+      const accountProblem = outcomes.find((o) => o.status === "out_of_credit" || o.status === "persistent_auth_failure");
+      if (accountProblem && accountProblem.status !== "ok") {
+        tally.problems.unshift(`ACTION NEEDED: ${accountProblem.actionableMessage}`);
+        writeStepSummary(
+          `## Action needed: ${accountProblem.status === "out_of_credit" ? "Anthropic credit exhausted" : "Claude API key rejected"}\n\n` +
+            `${accountProblem.actionableMessage}\n\n` +
+            `Data ingestion still ran, so the missed days can be backfilled later with \`npm run backfill:gap\`.\n`
+        );
       }
 
       console.log("[C5] Checking outcomes of past signals against real price data...");

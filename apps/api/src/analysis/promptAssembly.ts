@@ -128,8 +128,15 @@ export async function assembleContextForTicker(symbol: string, asOfDate: Date = 
   const citationMap: Record<string, CitationRecord> = {};
 
   // --- Insider filings: pre-tagged (A5 hybrid design) ---
+  // Bounded on filedAt as well as transactionDate: a Form 4 is filed up to two
+  // business days after the trade, so a backtest date between the two would
+  // otherwise see a filing that wasn't public yet. No effect on live runs.
   const filings = await prisma.insiderFiling.findMany({
-    where: { tickerId: ticker.id, transactionDate: { gte: daysAgo(INSIDER_LOOKBACK_DAYS, asOfDate), lte: asOfDate } },
+    where: {
+      tickerId: ticker.id,
+      transactionDate: { gte: daysAgo(INSIDER_LOOKBACK_DAYS, asOfDate), lte: asOfDate },
+      filedAt: { lte: asOfDate },
+    },
     orderBy: { transactionDate: "desc" },
     take: MAX_INSIDER_FILINGS,
   });

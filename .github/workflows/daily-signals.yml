@@ -11,12 +11,18 @@ name: Daily signal generation
 # twice a year until D2's real per-user timezone handling exists.
 on:
   schedule:
-    - cron: "0 13 * * 1-5" # ~9am US Eastern on weekdays, DST not accounted for (see note above)
+    # Mon/Wed/Fri rather than every weekday (2026-11-19): signals use a 7-day
+    # horizon, so daily runs mostly overlapped -- each one costs real Claude
+    # credit without adding much independent evidence.
+    - cron: "0 13 * * 1,3,5" # ~9am US Eastern, DST not accounted for (see note above)
   workflow_dispatch: {} # manual trigger, e.g. for testing this workflow itself
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
+    # Signals now go through the Batches API, which waits for results (usually
+    # minutes; the client gives up and cancels at 4h). Leave headroom past that.
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 

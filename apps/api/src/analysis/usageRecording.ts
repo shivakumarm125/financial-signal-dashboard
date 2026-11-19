@@ -27,12 +27,15 @@ function currentPricing(asOf: Date = new Date()) {
   return asOf < INTRO_PRICING_CUTOFF ? PRICING.intro : PRICING.standard;
 }
 
-export function estimateCostUsd(usage: TokenCounts, asOf: Date = new Date()): number {
+// Message Batches API bills every token at half the standard rate.
+const BATCH_DISCOUNT = 0.5;
+
+export function estimateCostUsd(usage: TokenCounts, asOf: Date = new Date(), opts: { batch?: boolean } = {}): number {
   const pricing = currentPricing(asOf);
-  return (
+  const cost =
     (usage.inputTokens / 1_000_000) * pricing.inputPerMTok +
-    (usage.outputTokens / 1_000_000) * pricing.outputPerMTok
-  );
+    (usage.outputTokens / 1_000_000) * pricing.outputPerMTok;
+  return opts.batch ? cost * BATCH_DISCOUNT : cost;
 }
 
 /** What the call was for. Keeps backtest spend from being mistaken for live-signal spend. */
@@ -54,7 +57,7 @@ export type UsagePurpose = "signal" | "backtest" | "adhoc";
  */
 export async function recordUsage(
   usage: TokenCounts,
-  opts: { tickerId?: string | null; purpose?: UsagePurpose } = {}
+  opts: { tickerId?: string | null; purpose?: UsagePurpose; batch?: boolean } = {}
 ): Promise<void> {
   await prisma.usageRecord.create({
     data: {
@@ -62,7 +65,7 @@ export async function recordUsage(
       purpose: opts.purpose ?? "adhoc",
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      estimatedCostUsd: estimateCostUsd(usage),
+      estimatedCostUsd: estimateCostUsd(usage, new Date(), { batch: opts.batch }),
     },
   });
 }

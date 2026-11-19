@@ -14,7 +14,8 @@
     "check:outcomes": "tsx src/scripts/check-outcomes.ts",
     "run:backtest": "tsx src/scripts/run-backtest.ts",
     "screen:candidates": "tsx src/scripts/screen-candidates.ts",
-    "ingest:social": "tsx src/scripts/ingest-social.ts"
+    "ingest:social": "tsx src/scripts/ingest-social.ts",
+    "backfill:gap": "tsx src/scripts/backfill-gap.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
