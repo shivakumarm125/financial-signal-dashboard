@@ -80,8 +80,9 @@ these repository secrets (Settings → Secrets and variables → Actions): `DATA
 On a fork, open the **Actions** tab once and enable workflows. GitHub turns scheduled workflows off
 on forks until you do.
 
-If your Claude credit runs out, the run summary says so. Delete the `CLAUDE_API_KEY` secret to switch
-to the free rules.
+If your Claude key stops working or your credit runs out, that update makes its calls with the free
+rules instead, so the dashboard never goes stale. The run shows a warning saying so. Top up to go
+back to Claude, or delete the `CLAUDE_API_KEY` secret to stay on the rules.
 
 ### Put the website online (Vercel)
 

@@ -35,7 +35,7 @@ export function classifyOutcome(result: ValidatedSignalResult): SignalOutcome {
       status: "persistent_auth_failure",
       tickerSymbol: result.tickerSymbol,
       actionableMessage:
-        "Your Claude API key appears to be invalid or has been revoked. Update it in your account settings to resume signals for this ticker.",
+        "Your Claude API key was rejected (invalid or revoked). Set a new one as CLAUDE_API_KEY to resume Claude's calls.",
       rawMessage: result.message,
     };
   }

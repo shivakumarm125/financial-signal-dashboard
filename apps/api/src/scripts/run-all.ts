@@ -30,12 +30,14 @@ function writeStepSummary(markdown: string): void {
  * could previously generate ZERO signals and still exit 0 with a green tick.
  */
 
-interface RunTally {
+export interface RunTally {
   tickersAttempted: number;
   signalsGenerated: number;
   signalsFailed: number;
   ingestionErrors: number;
   outcomesUpdated: number;
+  /** Calls the rules made because Claude was unavailable (bad key, no credit). */
+  fallbacks: number;
   problems: string[];
 }
 
@@ -49,23 +51,34 @@ export function classify(tally: RunTally): { status: "success" | "partial" | "fa
       detail: `No signals generated for any of ${tally.tickersAttempted} ticker(s). ${tally.problems.join(" | ")}`,
     };
   }
-  if (tally.signalsFailed > 0 || tally.ingestionErrors > 0) {
+  if (tally.signalsFailed > 0 || tally.ingestionErrors > 0 || tally.fallbacks > 0) {
+    const fellBack = tally.fallbacks > 0 ? `, ${tally.fallbacks} of them by the free rules because Claude was unavailable` : "";
     return {
       status: "partial",
-      detail: `${tally.signalsGenerated} signal(s) generated, but ${tally.signalsFailed} failed and ${tally.ingestionErrors} ingestion error(s). ${tally.problems.join(" | ")}`,
+      detail: `${tally.signalsGenerated} signal(s) generated${fellBack}; ${tally.signalsFailed} failed and ${tally.ingestionErrors} ingestion error(s). ${tally.problems.join(" | ")}`,
     };
   }
   return { status: "success", detail: null };
 }
 
-async function generateWithClaude(symbols: string[], tally: RunTally): Promise<void> {
+// A dead key or an empty balance fails every ticker identically. Those
+// stocks fall back to the free rules so the dashboard keeps updating: before
+// this, an expired key left it frozen for two months (2026-09-16 to 11-19).
+const ACCOUNT_PROBLEMS = new Set(["out_of_credit", "persistent_auth_failure"]);
+
+export async function generateWithClaude(symbols: string[], tally: RunTally): Promise<void> {
   console.log("[D1] Generating signals (C1-C6, one batch)...");
   const outcomes = await generateSignalsWithRetry(symbols);
+  const fallBack: string[] = [];
   for (const outcome of outcomes) {
     const symbol = outcome.tickerSymbol;
     if (outcome.status === "ok") {
       tally.signalsGenerated++;
       console.log(`[D1] ${symbol}: ok`);
+    } else if (ACCOUNT_PROBLEMS.has(outcome.status)) {
+      fallBack.push(symbol);
+      console.error(`[D1] ${symbol}: ${outcome.status} -- falling back to the rules engine`);
+      console.error(`     cause: ${outcome.rawMessage}`);
     } else {
       tally.signalsFailed++;
       // The raw message used to be dropped on the floor, so a failure read
@@ -78,19 +91,22 @@ async function generateWithClaude(symbols: string[], tally: RunTally): Promise<v
     }
   }
 
-  // A dead key or an empty balance fails every ticker identically, and it
-  // went unnoticed for two months (2026-09-16 to 11-19) as a generic red
-  // run. Say exactly what to do, at the top of the run summary. Ingestion
-  // still ran on purpose: that data is what lets the gap be backfilled once
-  // Claude is reachable again.
-  const accountProblem = outcomes.find((o) => o.status === "out_of_credit" || o.status === "persistent_auth_failure");
+  const accountProblem = outcomes.find((o) => ACCOUNT_PROBLEMS.has(o.status));
   if (accountProblem && accountProblem.status !== "ok") {
-    tally.problems.unshift(`ACTION NEEDED: ${accountProblem.actionableMessage}`);
+    const before = tally.signalsGenerated;
+    await generateWithRules(fallBack, tally);
+    tally.fallbacks += tally.signalsGenerated - before;
+
+    const headline = accountProblem.status === "out_of_credit" ? "Anthropic credit exhausted" : "Claude API key rejected";
+    tally.problems.unshift(`ACTION NEEDED: ${accountProblem.actionableMessage} Used the free rules for ${fallBack.join(", ")}.`);
+    // The run stays green, because the dashboard did update, so say it where
+    // it will be seen: an annotation on the run, and the top of its summary.
+    console.log(`::warning title=${headline}::${accountProblem.actionableMessage} Calls for ${fallBack.join(", ")} were made by the free rules instead.`);
     writeStepSummary(
-      `## Action needed: ${accountProblem.status === "out_of_credit" ? "Anthropic credit exhausted" : "Claude API key rejected"}\n\n` +
+      `## ${headline}: used the free rules instead\n\n` +
         `${accountProblem.actionableMessage}\n\n` +
-        `Data ingestion still ran, so the missed days can be backfilled later with \`npm run backfill:gap\`. ` +
-        `Or remove the CLAUDE_API_KEY secret to switch to the free rules engine.\n`
+        `Calls for ${fallBack.join(", ")} were made by the free rules engine, so the dashboard still updated. ` +
+        `To go back to Claude, fix the key or top up. To stay on the rules, delete the CLAUDE_API_KEY secret.\n`
     );
   }
 }
@@ -119,6 +135,7 @@ async function main() {
     signalsFailed: 0,
     ingestionErrors: 0,
     outcomesUpdated: 0,
+    fallbacks: 0,
     problems: [],
   };
 
@@ -234,8 +251,12 @@ async function main() {
   }
 }
 
-main().catch(async (err) => {
-  console.error("[D1] Fatal error:", err);
-  await prisma.$disconnect();
-  process.exit(1);
-});
+// Only when run as a script, so the pieces above can be imported in tests
+// without kicking off a full pipeline run.
+if (require.main === module) {
+  main().catch(async (err) => {
+    console.error("[D1] Fatal error:", err);
+    await prisma.$disconnect();
+    process.exit(1);
+  });
+}
