@@ -9,7 +9,16 @@ import { CLAUDE_API_KEY, CLAUDE_MODEL } from "./config";
 // (default max_retries: 2). This is a scheduled batch job, not a live chat --
 // there's no user waiting on a spinner -- so it's worth being more patient
 // than the interactive default before an error ever reaches our own code (C6).
-const client = new Anthropic({ apiKey: CLAUDE_API_KEY, maxRetries: 5 });
+let cachedClient: Anthropic | undefined;
+
+/** Built on first use, so code paths that never call Claude (the free rules engine) run without a key. */
+function getClient(): Anthropic {
+  if (!CLAUDE_API_KEY) {
+    throw new Error("CLAUDE_API_KEY is not set. Add one to use Claude, or leave it out to use the free rules engine.");
+  }
+  cachedClient ??= new Anthropic({ apiKey: CLAUDE_API_KEY, maxRetries: 5 });
+  return cachedClient;
+}
 
 // A5's required output schema (direction/confidence/rationale/citations).
 // Structured outputs (output_config.format) enforce this shape at the API
@@ -87,7 +96,7 @@ export async function generateSignal(
   const safePrompt = stripLoneSurrogates(promptText);
 
   try {
-    const response = await client.messages.parse({
+    const response = await getClient().messages.parse({
       model: CLAUDE_MODEL,
       max_tokens: 2048,
       messages: [{ role: "user", content: safePrompt }],
@@ -161,7 +170,7 @@ export async function generateSignalsBatch(requests: BatchSignalRequest[]): Prom
   const format = zodOutputFormat(SignalSchema);
   let batchId: string;
   try {
-    const batch = await client.messages.batches.create({
+    const batch = await getClient().messages.batches.create({
       requests: requests.map((r) => ({
         custom_id: r.customId,
         params: {
@@ -183,20 +192,20 @@ export async function generateSignalsBatch(requests: BatchSignalRequest[]): Prom
   const deadline = Date.now() + BATCH_MAX_WAIT_MS;
   let canceled = false;
   for (;;) {
-    const batch = await client.messages.batches.retrieve(batchId);
+    const batch = await getClient().messages.batches.retrieve(batchId);
     if (batch.processing_status === "ended") break;
     if (!canceled && Date.now() > deadline) {
       // Cancelling still bills whatever already finished; those results are
       // read and recorded below like any other, so the spend isn't lost.
       console.warn(`[Batch] ${batchId} still running after ${BATCH_MAX_WAIT_MS / 60000} min, cancelling`);
-      await client.messages.batches.cancel(batchId);
+      await getClient().messages.batches.cancel(batchId);
       canceled = true;
     }
     await sleep(BATCH_POLL_INTERVAL_MS);
   }
 
   const byId = new Map(requests.map((r) => [r.customId, r]));
-  for await (const entry of await client.messages.batches.results(batchId)) {
+  for await (const entry of await getClient().messages.batches.results(batchId)) {
     const request = byId.get(entry.custom_id);
     const { result } = entry;
 
@@ -235,7 +244,7 @@ export async function generateSignalsBatch(requests: BatchSignalRequest[]): Prom
  * estimate before spending an actual generation call.
  */
 export async function countPromptTokens(promptText: string): Promise<number> {
-  const result = await client.messages.countTokens({
+  const result = await getClient().messages.countTokens({
     model: CLAUDE_MODEL,
     messages: [{ role: "user", content: stripLoneSurrogates(promptText) }],
   });
@@ -250,7 +259,7 @@ export async function countPromptTokens(promptText: string): Promise<number> {
  */
 export async function validateApiKey(): Promise<ClaudeCallResult> {
   try {
-    const response = await client.messages.create({
+    const response = await getClient().messages.create({
       model: CLAUDE_MODEL,
       max_tokens: 16,
       messages: [{ role: "user", content: "Reply with only the word OK." }],

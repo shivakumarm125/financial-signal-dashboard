@@ -6,6 +6,8 @@
     "packages/*"
   ],
   "scripts": {
+    "setup": "npm run build --workspace=@financial-adviser/shared && tsx apps/api/src/scripts/setup.ts",
+    "dev": "npm run dev --workspace=@financial-adviser/web",
     "ingest:filings": "npm run ingest:filings --workspace=@financial-adviser/api"
   }
 }

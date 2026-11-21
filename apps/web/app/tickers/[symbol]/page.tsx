@@ -80,7 +80,7 @@ export default async function StockPage({ params }: { params: { symbol: string }
             {verdict.label}.
           </h1>
           <p className="mt-3 text-[15px] text-muted">
-            {surenessFor(latest.confidence)}. Call made {fmtDay(latest.createdAt)} for the week to{" "}
+            {surenessFor(latest.confidence)}. {latest.engine === "rules" ? "Made by simple rules. " : ""}Call made {fmtDay(latest.createdAt)} for the week to{" "}
             {fmtDay(addDays(latest.createdAt, HORIZON_DAYS))}.
           </p>
 
@@ -152,7 +152,11 @@ export default async function StockPage({ params }: { params: { symbol: string }
               </ul>
             </>
           )}
-          <p className="mt-6 text-sm text-muted">Written by an AI model from prices, news, insider filings and forum posts.</p>
+          <p className="mt-6 text-sm text-muted">
+            {latest.engine === "rules"
+              ? "Made by simple fixed rules from prices and insider purchases. No AI was used."
+              : "Written by an AI model from prices, news, insider filings and forum posts."}
+          </p>
         </details>
       )}
 

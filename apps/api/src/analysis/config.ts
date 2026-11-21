@@ -1,9 +1,10 @@
-const apiKey = process.env.CLAUDE_API_KEY;
-if (!apiKey) {
-  throw new Error("CLAUDE_API_KEY is not set. (Placeholder single-key setup per A4/C2 Q1 -- will be a per-user encrypted DB lookup once E2 exists.)");
-}
+// Optional: with no key, the pipeline makes its calls with the free rules
+// engine (apps/api/src/baseline) instead of Claude. An empty string counts as
+// unset, because GitHub Actions passes a missing secret as "".
+const apiKey = process.env.CLAUDE_API_KEY?.trim() || undefined;
 
 export const CLAUDE_API_KEY = apiKey;
+export const claudeEnabled = apiKey !== undefined;
 
 // The model the analysis engine actually calls -- validation (A4 Q11) must
 // target this exact model, not a cheaper stand-in.

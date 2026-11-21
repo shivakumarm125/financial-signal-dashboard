@@ -343,6 +343,11 @@ model SignalRecord {
   // makes the grade reproducible.
   entryPrice Decimal? @db.Decimal(20, 4)
 
+  // Which engine made the call: "claude" (AI, needs an API key) or "rules"
+  // (the free fixed checks in apps/api/src/baseline). Kept per signal so a
+  // track record can never silently mix the two.
+  engine String @default("claude")
+
   // Real outcome tracking (finishing C5, 2026-07-20). null = not yet
   // evaluated (either too early, or nothing terminal has happened yet).
   // Checked against actual daily price bars, not simulated.
