@@ -6,6 +6,9 @@ name: Daily signal generation
 # (Twelve Data: 8s/call, Finnhub: 1.1s/call) that can exceed typical
 # serverless function timeouts for more than a handful of tickers.
 #
+# CLAUDE_API_KEY is optional: leave the secret unset to use the free rules
+# engine instead of Claude.
+#
 # Known gap (deferred to D2, not yet built): this fires at a fixed UTC time,
 # which does not auto-adjust for US Eastern DST -- "9am ET" drifts by an hour
 # twice a year until D2's real per-user timezone handling exists.
@@ -24,11 +27,11 @@ jobs:
     # minutes; the client gives up and cancels at 4h). Leave headroom past that.
     timeout-minutes: 300
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 18
+          node-version: 24
 
       - name: Install dependencies
         run: npm install

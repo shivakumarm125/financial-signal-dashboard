@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { addTicker, removeTicker } from "./actions";
 import type { ActionResult } from "./config";
 
@@ -31,7 +32,7 @@ function Result({ state }: { state: ActionResult | null }) {
 }
 
 export function AddTickerForm({ full }: { full: boolean }) {
-  const [state, formAction] = useFormState(addTicker, null);
+  const [state, formAction] = useActionState(addTicker, null);
 
   return (
     <form action={formAction}>
@@ -53,7 +54,7 @@ export function AddTickerForm({ full }: { full: boolean }) {
 }
 
 export function RemoveTickerForm({ symbol }: { symbol: string }) {
-  const [state, formAction] = useFormState(removeTicker, null);
+  const [state, formAction] = useActionState(removeTicker, null);
 
   return (
     <form action={formAction}>

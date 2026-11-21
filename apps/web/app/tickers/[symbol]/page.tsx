@@ -20,8 +20,9 @@ export const dynamic = "force-dynamic";
 
 const PAST_CALLS_SHOWN = 8;
 
-export default async function StockPage({ params }: { params: { symbol: string } }) {
-  const symbol = params.symbol.toUpperCase();
+// Next 15: route params arrive as a promise.
+export default async function StockPage({ params }: { params: Promise<{ symbol: string }> }) {
+  const symbol = (await params).symbol.toUpperCase();
   const ticker = await prisma.ticker.findUnique({ where: { symbol } });
   if (!ticker) notFound();
 
