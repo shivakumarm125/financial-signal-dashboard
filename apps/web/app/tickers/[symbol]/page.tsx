@@ -1,263 +1,198 @@
 import { notFound } from "next/navigation";
-import { prisma, computeReachability, getHitRateSummaryForTicker } from "@financial-adviser/shared";
-import { ReachabilityDetail } from "../../components/Reachability";
+import { prisma } from "@financial-adviser/shared";
+import { loadMarketFacts, loadReliability } from "../../lib/marketFacts";
 import {
-  TrackRecordSummary,
-  IndependenceNote,
-  NoOutcomesYet,
-  OUTCOME_LABELS,
-  outcomeTone,
-  directionColor as signalDirectionColor,
-} from "../../components/TrackRecord";
+  verdictFor,
+  surenessFor,
+  levelsInWords,
+  outcomeInWords,
+  reliabilityInWords,
+  factsInWords,
+  weekChangeInWords,
+  fmtDay,
+  fmtPrice,
+  addDays,
+  HORIZON_DAYS,
+} from "../../lib/plain";
 
 export const dynamic = "force-dynamic";
 
-function directionColor(direction: string): string {
-  if (direction === "bullish") return "text-bullish";
-  if (direction === "bearish") return "text-bearish";
-  return "text-neutralSignal";
-}
+const PAST_CALLS_SHOWN = 8;
 
-function fmtDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-export default async function TickerDetailPage({ params }: { params: { symbol: string } }) {
+export default async function StockPage({ params }: { params: { symbol: string } }) {
   const symbol = params.symbol.toUpperCase();
   const ticker = await prisma.ticker.findUnique({ where: { symbol } });
   if (!ticker) notFound();
 
-  const [priceBars, filings, news, latestSignal] = await Promise.all([
-    prisma.priceBar.findMany({ where: { tickerId: ticker.id }, orderBy: { date: "desc" }, take: 10 }),
-    prisma.insiderFiling.findMany({ where: { tickerId: ticker.id }, orderBy: { transactionDate: "desc" }, take: 5 }),
-    prisma.newsArticle.findMany({ where: { tickerId: ticker.id }, orderBy: { publishedAt: "desc" }, take: 5 }),
-    prisma.signalRecord.findFirst({
-      where: { tickerId: ticker.id },
-      orderBy: { createdAt: "desc" },
-      include: { citations: true },
-    }),
-  ]);
+  // Sequential on purpose: production allows one database connection.
+  const latest = await prisma.signalRecord.findFirst({
+    where: { tickerId: ticker.id },
+    orderBy: { createdAt: "desc" },
+    include: { citations: true },
+  });
+  const pastCalls = await prisma.signalRecord.findMany({
+    where: { tickerId: ticker.id, ...(latest ? { id: { not: latest.id } } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: PAST_CALLS_SHOWN,
+  });
+  const news = await prisma.newsArticle.findMany({
+    where: { tickerId: ticker.id },
+    orderBy: { publishedAt: "desc" },
+    take: 5,
+  });
+  const facts = (await loadMarketFacts([ticker.id])).get(ticker.id)!;
+  const reliability = await loadReliability(ticker.id);
 
-  let citationLabels: Record<string, string> = {};
-  if (latestSignal) {
-    const filingIds = latestSignal.citations.filter((c) => c.sourceType === "filing").map((c) => c.sourceRecordId);
-    const newsIds = latestSignal.citations.filter((c) => c.sourceType === "news").map((c) => c.sourceRecordId);
-    const [citedFilings, citedNews] = await Promise.all([
-      prisma.insiderFiling.findMany({ where: { id: { in: filingIds } } }),
-      prisma.newsArticle.findMany({ where: { id: { in: newsIds } } }),
-    ]);
-    citationLabels = {
-      ...Object.fromEntries(citedFilings.map((f) => [f.id, `${f.insiderName} — ${f.transactionCode} on ${fmtDate(f.transactionDate)}`])),
-      ...Object.fromEntries(citedNews.map((n) => [n.id, `${n.source}: ${n.headline}`])),
-    };
-  }
+  const newsIds = latest?.citations.filter((c) => c.sourceType === "news").map((c) => c.sourceRecordId) ?? [];
+  const citedNews = newsIds.length ? await prisma.newsArticle.findMany({ where: { id: { in: newsIds } } }) : [];
 
-  const latestBar = priceBars[0];
-
-  const reachability = latestSignal
-    ? await computeReachability({
-        tickerId: ticker.id,
-        direction: latestSignal.direction,
-        targetPrice: latestSignal.targetPrice ? Number(latestSignal.targetPrice) : null,
-        confidence: latestSignal.confidence,
-      })
+  const verdict = latest ? verdictFor(latest.direction) : null;
+  const levels = latest
+    ? levelsInWords(
+        latest.direction,
+        latest.targetPrice ? Number(latest.targetPrice) : null,
+        latest.stopLossPrice ? Number(latest.stopLossPrice) : null,
+        latest.createdAt
+      )
     : null;
-
-  // Per-ticker track record (B12). The more meaningful unit than the combined
-  // figure on /history: tickers differ enough in how often their 7-day windows
-  // resolve that pooling them describes none of them.
-  const [tickerSummary, tickerSignals] = await Promise.all([
-    getHitRateSummaryForTicker(ticker.id),
-    prisma.signalRecord.findMany({
-      where: { tickerId: ticker.id },
-      orderBy: { createdAt: "desc" },
-      take: 15,
-    }),
-  ]);
-  const tickerPending = tickerSignals.filter((s) => s.outcome === null).length;
-  const hasResolved = tickerSummary.totalEvaluated > 0;
+  const week = weekChangeInWords(facts.weekChangePct);
+  const seeing = factsInWords(facts);
 
   return (
     <main>
-      <p className="mb-8">
+      <p className="mb-6">
         <a href="/" className="text-sm text-muted hover:text-ink">
-          ← Watchlist
+          ← My stocks
         </a>
       </p>
 
-      <h2 className="text-xl font-medium">
-        {ticker.symbol} <span className="text-muted font-normal">{ticker.name}</span>
-      </h2>
-
-      {latestSignal ? (
-        <section className="mt-6 rounded border border-line bg-white p-6">
-          <div className="flex items-baseline justify-between">
-            <span className={`text-lg font-medium capitalize ${directionColor(latestSignal.direction)}`}>
-              {latestSignal.direction}
-            </span>
-            <span className="text-sm text-muted">
-              {latestSignal.confidence}% direction confidence
-              {latestSignal.rawConfidence !== latestSignal.confidence && (
-                <span> (Claude said {latestSignal.rawConfidence}%, capped — signals disagreed)</span>
-              )}
-            </span>
-          </div>
-          <p className="mt-3 text-sm leading-relaxed text-ink">{latestSignal.rationale}</p>
-
-          {(latestSignal.entryGuidance || latestSignal.targetPrice || latestSignal.stopLossPrice) && (
-            <div className="mt-4 rounded border border-line bg-paper p-4">
-              <p className="text-xs uppercase tracking-wide text-muted">Trade levels — suggestions, not instructions</p>
-              {latestSignal.entryGuidance && <p className="mt-2 text-sm text-ink">{latestSignal.entryGuidance}</p>}
-              <div className="mt-3 flex gap-6 text-sm">
-                {latestSignal.targetPrice && (
-                  <div>
-                    <span className="text-muted">Target: </span>
-                    <span className="font-medium">${Number(latestSignal.targetPrice).toFixed(2)}</span>
-                  </div>
-                )}
-                {latestSignal.stopLossPrice && (
-                  <div>
-                    <span className="text-muted">Stop-loss: </span>
-                    <span className="font-medium">${Number(latestSignal.stopLossPrice).toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {reachability && (
-            <div className="mt-4">
-              <ReachabilityDetail result={reachability} />
-            </div>
-          )}
-
-          {latestSignal.citations.length > 0 && (
-            <div className="mt-4 border-t border-line pt-4">
-              <p className="text-xs uppercase tracking-wide text-muted">Sources cited</p>
-              <ul className="mt-2 space-y-1 text-sm text-muted">
-                {latestSignal.citations.map((c) => (
-                  <li key={c.id}>{citationLabels[c.sourceRecordId] ?? c.sourceRecordId}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <p className="mt-4 text-xs text-muted">
-            Generated {fmtDate(latestSignal.createdAt)} · Not financial advice — this AI-generated signal, including
-            the price levels above, may be wrong. You are solely responsible for your own trading decisions.
-          </p>
-        </section>
-      ) : (
-        <p className="mt-6 text-muted">No signal generated yet for this ticker.</p>
-      )}
-
-      <section className="mt-8 rounded border border-line bg-white p-6">
-        <div className="flex items-baseline justify-between gap-4">
-          <h3 className="text-xs uppercase tracking-wide text-muted">
-            Track record — {ticker.symbol} only
-          </h3>
-          <a href="/history" className="text-xs text-muted hover:text-ink">
-            All tickers →
-          </a>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold">{ticker.name ?? ticker.symbol}</h1>
+          <p className="text-muted">{ticker.symbol}</p>
         </div>
-
-        {hasResolved ? (
-          <>
-            <TrackRecordSummary summary={tickerSummary} pending={tickerPending} />
-            <IndependenceNote summary={tickerSummary} />
-          </>
-        ) : (
-          <NoOutcomesYet pending={tickerPending} total={tickerSignals.length} />
-        )}
-
-        {tickerSignals.length > 0 && (
-          <div className="mt-4 overflow-x-auto border-t border-line pt-3">
-            <table className="w-full min-w-[32rem] text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-muted">
-                  <th className="pb-2 font-normal">Date</th>
-                  <th className="pb-2 font-normal">Signal</th>
-                  <th className="pb-2 text-right font-normal">Target</th>
-                  <th className="pb-2 text-right font-normal">Stop</th>
-                  <th className="pb-2 font-normal">Outcome</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tickerSignals.map((s) => (
-                  <tr key={s.id} className="border-t border-line align-top">
-                    <td className="py-1.5 whitespace-nowrap text-muted">{fmtDate(s.createdAt)}</td>
-                    <td className={`py-1.5 capitalize ${signalDirectionColor(s.direction)}`}>
-                      {s.direction} <span className="text-muted">{s.confidence}%</span>
-                    </td>
-                    <td className="py-1.5 text-right">
-                      {s.targetPrice ? `$${Number(s.targetPrice).toFixed(2)}` : "—"}
-                    </td>
-                    <td className="py-1.5 text-right">
-                      {s.stopLossPrice ? `$${Number(s.stopLossPrice).toFixed(2)}` : "—"}
-                    </td>
-                    <td className={`py-1.5 ${outcomeTone(s.outcome)}`}>
-                      {OUTCOME_LABELS[s.outcome ?? "pending"] ?? s.outcome}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {facts.price !== null && (
+          <div className="text-right">
+            <div className="text-2xl font-medium">{fmtPrice(facts.price)}</div>
+            {week && <div className={`text-sm ${week.tone}`}>{week.text}</div>}
           </div>
         )}
-      </section>
-
-      <div className="mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2">
-        <section>
-          <h3 className="text-xs uppercase tracking-wide text-muted">Recent price</h3>
-          {latestBar && (
-            <p className="mt-2 text-2xl font-medium">${Number(latestBar.close).toFixed(2)}</p>
-          )}
-          <table className="mt-3 w-full text-sm">
-            <tbody>
-              {priceBars.map((bar) => (
-                <tr key={bar.id} className="border-t border-line">
-                  <td className="py-1.5 text-muted">{fmtDate(bar.date)}</td>
-                  <td className="py-1.5 text-right">${Number(bar.close).toFixed(2)}</td>
-                  <td className="py-1.5 text-right text-muted">{Number(bar.volume).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <section>
-          <h3 className="text-xs uppercase tracking-wide text-muted">Recent insider filings</h3>
-          {filings.length === 0 ? (
-            <p className="mt-2 text-sm text-muted">None in the last 90 days.</p>
-          ) : (
-            <ul className="mt-2 space-y-2 text-sm">
-              {filings.map((f) => (
-                <li key={f.id} className="border-t border-line pt-2">
-                  <span className="text-muted">{fmtDate(f.transactionDate)}</span> — {f.insiderName} (
-                  {f.transactionCode}) {Number(f.sharesTransacted).toLocaleString()} shares
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </div>
 
+      {latest && verdict ? (
+        <section className="mt-6 rounded-xl bg-white p-5 ring-1 ring-line">
+          <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-lg font-medium ${verdict.bg} ${verdict.tone}`}>
+            <span aria-hidden>{verdict.symbol}</span>
+            {verdict.label}
+          </div>
+          <p className="mt-2 text-sm text-muted">
+            {surenessFor(latest.confidence)} · call made {fmtDay(latest.createdAt)}, for the week to{" "}
+            {fmtDay(addDays(latest.createdAt, HORIZON_DAYS))}
+          </p>
+
+          {levels && (
+            <div className="mt-4 space-y-1 text-[15px] leading-relaxed">
+              <p>{levels.ifRight}</p>
+              <p>{levels.ifWrong}</p>
+            </div>
+          )}
+          {latest.direction === "neutral" && (
+            <p className="mt-4 text-[15px] leading-relaxed">
+              Nothing points clearly up or down right now, so no call this week.
+            </p>
+          )}
+        </section>
+      ) : (
+        <p className="mt-6 text-muted">No call yet for this stock.</p>
+      )}
+
+      {seeing.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-base font-semibold">What we&apos;re seeing</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-[15px] leading-relaxed">
+            {seeing.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {latest && (
+        <details className="mt-6 rounded-xl bg-white p-5 ring-1 ring-line">
+          <summary className="cursor-pointer text-[15px] font-medium">Read the full reasoning</summary>
+          <p className="mt-3 text-[15px] leading-relaxed">{latest.rationale}</p>
+          {latest.entryGuidance && (
+            <>
+              <h3 className="mt-4 text-sm font-semibold">Notes for people who trade</h3>
+              <p className="mt-1 text-[15px] leading-relaxed">{latest.entryGuidance}</p>
+            </>
+          )}
+          {citedNews.length > 0 && (
+            <>
+              <h3 className="mt-4 text-sm font-semibold">News it was based on</h3>
+              <ul className="mt-1 space-y-1 text-sm text-muted">
+                {citedNews.map((n) => (
+                  <li key={n.id}>
+                    {n.source}: {n.headline}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="mt-4 text-xs text-muted">Written by an AI model from prices, news, insider filings and forum posts.</p>
+        </details>
+      )}
+
       <section className="mt-8">
-        <h3 className="text-xs uppercase tracking-wide text-muted">Recent news</h3>
-        {news.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No recent news found.</p>
-        ) : (
-          <ul className="mt-2 space-y-3 text-sm">
+        <h2 className="text-base font-semibold">How past calls on {ticker.symbol} turned out</h2>
+        <p className="mt-1 text-[15px] text-muted">{reliabilityInWords(reliability.right, reliability.wrong)}</p>
+        {pastCalls.length > 0 && (
+          <ul className="mt-3 divide-y divide-line rounded-xl bg-white ring-1 ring-line">
+            {pastCalls.map((s) => {
+              const v = verdictFor(s.direction);
+              const o = outcomeInWords(s.outcome);
+              return (
+                <li key={s.id} className="flex items-center justify-between gap-4 px-4 py-2.5 text-[15px]">
+                  <span className="whitespace-nowrap text-muted">{fmtDay(s.createdAt)}</span>
+                  <span className={`flex-1 ${v.tone}`}>
+                    {v.symbol} {s.direction === "neutral" ? "No call" : s.direction === "bullish" ? "Up" : "Down"}
+                  </span>
+                  <span className={`text-right ${o.tone}`}>
+                    {o.mark} {o.text}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="mt-2 text-sm">
+          <a href="/history" className="text-muted underline hover:text-ink">
+            See all past results
+          </a>
+        </p>
+      </section>
+
+      {news.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-base font-semibold">Latest news</h2>
+          <ul className="mt-2 space-y-3">
             {news.map((n) => (
-              <li key={n.id} className="border-t border-line pt-3">
-                <span className="text-muted">
-                  {fmtDate(n.publishedAt)} · {n.source}
-                </span>
-                <div>{n.headline}</div>
+              <li key={n.id} className="text-[15px] leading-snug">
+                {n.url ? (
+                  <a href={n.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    {n.headline}
+                  </a>
+                ) : (
+                  n.headline
+                )}
+                <div className="text-sm text-muted">
+                  {n.source} · {fmtDay(n.publishedAt)}
+                </div>
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
     </main>
   );
 }

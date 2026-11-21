@@ -1,88 +1,53 @@
 import { prisma } from "@financial-adviser/shared";
+import { fmtDay } from "../lib/plain";
 
 /**
- * Surfaces pipeline health where it will actually be seen (D4's "surfaces to
- * the user" half). Two distinct failure modes, because they look identical
- * from the dashboard otherwise:
+ * "When was this last updated, and did it work?" in one line.
  *
- *   - the last run FAILED or only partly succeeded, and
- *   - no run has happened at all recently.
- *
- * The second is the dangerous one. A cron that silently stops firing leaves
- * yesterday's signals sitting there looking perfectly current, and nothing
- * about the page would tell you they're stale.
+ * Two failure modes look identical from the dashboard otherwise: the last
+ * update failed, or no update has happened at all recently. The second is the
+ * dangerous one -- old signals keep looking current -- and it is exactly what
+ * happened for two months from 2026-09-16, when a dead API key failed every
+ * run. The technical detail stays in the pipeline_runs table and the GitHub run
+ * summary; a reader here only needs to know whether to trust the dates.
  */
 
-// The cron is weekdays-only, so a long weekend plus a bank holiday can
-// legitimately reach ~4 days. Beyond that, something is wrong.
-const STALE_AFTER_HOURS = 96;
-
-function hoursSince(d: Date): number {
-  return (Date.now() - d.getTime()) / 3_600_000;
-}
-
-function fmtAge(hours: number): string {
-  if (hours < 1) return "less than an hour ago";
-  if (hours < 24) return `${Math.round(hours)} hour${Math.round(hours) === 1 ? "" : "s"} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
-}
+// Runs Mon/Wed/Fri, so a weekend gap is ~72h; a bank holiday can stretch it.
+const STALE_AFTER_HOURS = 100;
 
 export async function PipelineStatus() {
   const lastRun = await prisma.pipelineRun.findFirst({
     where: { finishedAt: { not: null } },
     orderBy: { startedAt: "desc" },
   });
+  const lastGood = await prisma.pipelineRun.findFirst({
+    where: { finishedAt: { not: null }, status: { in: ["success", "partial"] } },
+    orderBy: { startedAt: "desc" },
+  });
 
-  if (!lastRun) {
-    return (
-      <div className="mb-6 rounded border border-line bg-paper p-3 text-xs text-muted">
-        No pipeline run has been recorded yet. Signals on this page were generated before run
-        tracking existed.
-      </div>
-    );
-  }
+  if (!lastRun) return null;
 
-  const age = hoursSince(lastRun.finishedAt!);
-  const stale = age > STALE_AFTER_HOURS;
+  const hours = (Date.now() - (lastGood?.finishedAt ?? lastRun.finishedAt!).getTime()) / 3_600_000;
+  const stale = !lastGood || hours > STALE_AFTER_HOURS;
   const failed = lastRun.status === "failed";
-  const partial = lastRun.status === "partial";
 
-  if (!stale && !failed && !partial) {
+  if (!stale && !failed) {
     return (
-      <p className="mb-6 text-xs text-muted">
-        Last pipeline run {fmtAge(age)} — {lastRun.signalsGenerated} signal
-        {lastRun.signalsGenerated === 1 ? "" : "s"} generated
-        {lastRun.outcomesUpdated > 0 && `, ${lastRun.outcomesUpdated} outcome(s) resolved`}.
+      <p className="mb-5 text-sm text-muted">
+        Updated {fmtDay(lastGood!.finishedAt!)} · next update on the next Mon, Wed or Fri
       </p>
     );
   }
 
-  const tone = failed || stale ? "border-bearish/40 bg-bearish/5" : "border-neutralSignal/40 bg-neutralSignal/5";
-
   return (
-    <div className={`mb-6 rounded border p-3 text-xs leading-relaxed ${tone}`}>
-      <span className="font-medium">
-        {failed
-          ? "The last pipeline run failed."
-          : partial
-            ? "The last pipeline run only partly succeeded."
-            : "Signals may be out of date."}
-      </span>{" "}
-      {stale && (
-        <>
-          The most recent completed run was {fmtAge(age)}, and the schedule is every weekday — the
-          signals below may not reflect current prices or news.{" "}
-        </>
+    <div className="mb-5 rounded-lg border border-bearish/30 bg-bearish/5 px-4 py-3 text-sm leading-relaxed">
+      <span className="font-medium">These may be out of date.</span>{" "}
+      {lastGood ? (
+        <>The last successful update was {fmtDay(lastGood.finishedAt!)}</>
+      ) : (
+        <>There hasn&apos;t been a successful update yet</>
       )}
-      {!stale && (
-        <>
-          It finished {fmtAge(age)}: {lastRun.signalsGenerated} signal
-          {lastRun.signalsGenerated === 1 ? "" : "s"} generated, {lastRun.signalsFailed} failed,{" "}
-          {lastRun.ingestionErrors} ingestion error(s).{" "}
-        </>
-      )}
-      {lastRun.detail && <span className="text-muted">{lastRun.detail}</span>}
+      {failed ? " — the most recent update didn't work." : "."}
     </div>
   );
 }

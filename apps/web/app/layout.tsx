@@ -2,32 +2,36 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Financial Signal Dashboard",
-  description: "Research signals, not financial advice.",
+  title: "Stock Signals",
+  description: "A weekly read on a few stocks. One opinion, not financial advice.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <div className="mx-auto max-w-3xl px-6 py-10">
-          <header className="mb-10 border-b border-line pb-6">
-            <p className="text-xs uppercase tracking-wide text-muted">Financial Signal Dashboard</p>
-            <div className="mt-1 flex items-baseline justify-between gap-4">
-              <h1 className="text-2xl font-medium">
-                <a href="/">Watchlist</a>
-              </h1>
-              <nav className="flex gap-4 text-sm text-muted">
-                <a href="/history" className="hover:text-ink">
-                  Track record
-                </a>
-                <a href="/manage" className="hover:text-ink">
-                  Manage
-                </a>
-              </nav>
-            </div>
+        <div className="mx-auto max-w-2xl px-5 py-8 sm:py-12">
+          <header className="mb-8 flex items-baseline justify-between gap-4">
+            <a href="/" className="text-xl font-semibold tracking-tight">
+              Stock Signals
+            </a>
+            <nav className="flex items-baseline gap-5 text-[15px]">
+              <a href="/" className="text-muted hover:text-ink">
+                My stocks
+              </a>
+              <a href="/history" className="text-muted hover:text-ink">
+                Past results
+              </a>
+              <a href="/manage" className="text-xs text-muted/70 hover:text-ink">
+                Manage
+              </a>
+            </nav>
           </header>
           {children}
+          <footer className="mt-12 border-t border-line pt-5 text-xs leading-relaxed text-muted">
+            These are computer-generated opinions, not financial advice. They can be wrong. You are responsible for
+            your own decisions.
+          </footer>
         </div>
       </body>
     </html>

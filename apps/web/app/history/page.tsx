@@ -1,197 +1,127 @@
-import { prisma, getHitRateSummary, getBacktestHitRateSummary, summarizeOutcomes } from "@financial-adviser/shared";
-import {
-  TrackRecordSummary,
-  IndependenceNote,
-  OUTCOME_LABELS,
-  outcomeTone,
-  directionColor,
-  fmtDate,
-} from "../components/TrackRecord";
+import { prisma, getHitRateSummary, getBacktestHitRateSummary } from "@financial-adviser/shared";
+import { verdictFor, outcomeInWords, reliabilityInWords, fmtDay } from "../lib/plain";
 
 export const dynamic = "force-dynamic";
 
-export default async function HistoryPage() {
-  const [signals, backtests, summary, backtestSummary] = await Promise.all([
-    prisma.signalRecord.findMany({ orderBy: { createdAt: "desc" }, include: { ticker: true } }),
-    prisma.backtestSignal.findMany({ orderBy: { asOfDate: "desc" }, include: { ticker: true }, take: 25 }),
-    getHitRateSummary(),
-    getBacktestHitRateSummary(),
-  ]);
+const RECENT_SHOWN = 30;
 
-  const pending = signals.filter((s) => s.outcome === null).length;
+export default async function PastResultsPage() {
+  // Sequential on purpose: production allows one database connection.
+  const signals = await prisma.signalRecord.findMany({ orderBy: { createdAt: "desc" }, include: { ticker: true } });
+  const summary = await getHitRateSummary();
+  const backtest = await getBacktestHitRateSummary();
 
-  // Per-ticker rollup. Computed from the same rows rather than re-querying, so
-  // the parts always add up to the whole shown above them.
-  const bySymbol = new Map<string, typeof signals>();
+  const count = (o: string) => signals.filter((s) => s.outcome === o).length;
+  const right = count("hit_target");
+  const wrong = count("hit_stop");
+  const unclear = signals.filter((s) => s.outcome !== null && s.outcome !== "hit_target" && s.outcome !== "hit_stop").length;
+  const waiting = signals.filter((s) => s.outcome === null).length;
+
+  const bySymbol = new Map<string, { right: number; wrong: number }>();
   for (const s of signals) {
-    const list = bySymbol.get(s.ticker.symbol) ?? [];
-    list.push(s);
-    bySymbol.set(s.ticker.symbol, list);
+    const row = bySymbol.get(s.ticker.symbol) ?? { right: 0, wrong: 0 };
+    if (s.outcome === "hit_target") row.right++;
+    if (s.outcome === "hit_stop") row.wrong++;
+    bySymbol.set(s.ticker.symbol, row);
   }
-  const perTicker = [...bySymbol.entries()]
-    .map(([symbol, rows]) => ({
-      symbol,
-      total: rows.length,
-      pending: rows.filter((r) => r.outcome === null).length,
-      summary: summarizeOutcomes(
-        rows.filter((r) => r.outcome !== null).map((r) => ({ outcome: r.outcome!, outcomeDetail: r.outcomeDetail }))
-      ),
-    }))
-    .sort((a, b) => a.symbol.localeCompare(b.symbol));
+  const perStock = [...bySymbol.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+  const btRight = backtest.counts.hit_target ?? 0;
+  const btWrong = backtest.counts.hit_stop ?? 0;
 
   return (
     <main>
-      <h2 className="text-xl font-medium">Track record</h2>
-      <p className="mt-2 text-sm text-muted">
-        Every signal this system has published, graded against real daily price bars at a fixed
-        7-day horizon.
+      <h1 className="text-2xl font-semibold">Past results</h1>
+      <p className="mt-1 text-[15px] text-muted">
+        Each call is checked a week later against what the price actually did.
       </p>
 
-      <section className="mt-8 rounded border border-line bg-white p-6">
-        <h3 className="text-xs uppercase tracking-wide text-muted">All tickers combined</h3>
-        <TrackRecordSummary summary={summary} pending={pending} />
-        <IndependenceNote summary={summary} />
+      <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat value={right} label="Went as expected" tone="text-bullish" />
+        <Stat value={wrong} label="Went the other way" tone="text-bearish" />
+        <Stat value={unclear} label="No call, or no clear result" tone="text-muted" />
+        <Stat value={waiting} label="Still waiting to see" tone="text-muted" />
+      </section>
+      <p className="mt-4 text-[15px] leading-relaxed">{reliabilityInWords(right, wrong)}</p>
+
+      <section className="mt-8">
+        <h2 className="text-base font-semibold">By stock</h2>
+        <ul className="mt-2 divide-y divide-line rounded-xl bg-white ring-1 ring-line">
+          {perStock.map(([symbol, r]) => (
+            <li key={symbol}>
+              <a href={`/tickers/${symbol}`} className="flex items-center justify-between px-4 py-2.5 text-[15px] hover:bg-paper">
+                <span className="font-medium">{symbol}</span>
+                <span className="text-muted">
+                  {r.right + r.wrong === 0 ? "nothing checked yet" : `${r.right} of ${r.right + r.wrong} went as expected`}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="mt-8">
-        <h3 className="text-xs uppercase tracking-wide text-muted">By ticker</h3>
-        <p className="mt-2 text-xs leading-relaxed text-muted">
-          The combined figure above blends tickers that behave very differently — AAPL resolves only
-          ~39% of its 7-day windows cleanly, COIN ~97% — so it describes none of them precisely.
-          Per-ticker is the more meaningful unit, and the one that answers whether a given ticker is
-          worth continuing to track.
-        </p>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[36rem] text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-                <th className="py-2 font-normal">Ticker</th>
-                <th className="py-2 text-right font-normal">Signals</th>
-                <th className="py-2 text-right font-normal">Target/stop</th>
-                <th className="py-2 text-right font-normal">Hit rate</th>
-                <th className="py-2 text-right font-normal">Episodes</th>
-                <th className="py-2 text-right font-normal">Pending</th>
-              </tr>
-            </thead>
-            <tbody>
-              {perTicker.map((t) => (
-                <tr key={t.symbol} className="border-b border-line">
-                  <td className="py-2">
-                    <a href={`/tickers/${t.symbol}`} className="hover:underline">
-                      {t.symbol}
-                    </a>
-                  </td>
-                  <td className="py-2 text-right">{t.total}</td>
-                  <td className="py-2 text-right">{t.summary.targetStopEvaluated}</td>
-                  <td className="py-2 text-right">
-                    {t.summary.targetHitRate === null ? (
-                      <span className="text-muted">—</span>
-                    ) : (
-                      <>
-                        {t.summary.targetHitRate}%
-                        {t.summary.distinctResolutionDays < 10 && (
-                          <span className="text-neutralSignal" title="Too few independent episodes to be meaningful">
-                            {" "}
-                            *
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </td>
-                  <td className="py-2 text-right">{t.summary.distinctResolutionDays || "—"}</td>
-                  <td className="py-2 text-right">{t.pending}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-xs text-muted">
-          <span className="text-neutralSignal">*</span> fewer than 10 independent episodes — not yet
-          a meaningful rate. &ldquo;Episodes&rdquo; counts distinct market days on which outcomes
-          resolved, not signals; several signals closed by one price move are one test.
-        </p>
-      </section>
-
-      <section className="mt-10">
-        <h3 className="text-xs uppercase tracking-wide text-muted">Every signal</h3>
-        {signals.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No signals published yet.</p>
-        ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[40rem] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-                  <th className="py-2 font-normal">Date</th>
-                  <th className="py-2 font-normal">Ticker</th>
-                  <th className="py-2 font-normal">Signal</th>
-                  <th className="py-2 text-right font-normal">Target</th>
-                  <th className="py-2 text-right font-normal">Stop</th>
-                  <th className="py-2 font-normal">Outcome</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((s) => (
-                  <tr key={s.id} className="border-b border-line align-top">
-                    <td className="py-2 whitespace-nowrap text-muted">{fmtDate(s.createdAt)}</td>
-                    <td className="py-2">
-                      <a href={`/tickers/${s.ticker.symbol}`} className="hover:underline">
-                        {s.ticker.symbol}
-                      </a>
-                    </td>
-                    <td className={`py-2 capitalize ${directionColor(s.direction)}`}>
-                      {s.direction} <span className="text-muted">{s.confidence}%</span>
-                    </td>
-                    <td className="py-2 text-right">
-                      {s.targetPrice ? `$${Number(s.targetPrice).toFixed(2)}` : "—"}
-                    </td>
-                    <td className="py-2 text-right">
-                      {s.stopLossPrice ? `$${Number(s.stopLossPrice).toFixed(2)}` : "—"}
-                    </td>
-                    <td className={`py-2 ${outcomeTone(s.outcome)}`}>
-                      {OUTCOME_LABELS[s.outcome ?? "pending"] ?? s.outcome}
-                      {s.outcomeDetail && <div className="text-xs text-muted">{s.outcomeDetail}</div>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="mt-10 rounded border border-line bg-paper p-6">
-        <h3 className="text-xs uppercase tracking-wide text-muted">Historical backtest</h3>
-        <p className="mt-2 text-sm text-muted">
-          Signals simulated on past dates and graded against price action that had already happened.
-          Kept separate from the live record above — these were never published to anyone, and the
-          sample has known correlation problems.
-        </p>
-        <TrackRecordSummary summary={backtestSummary} />
-        <IndependenceNote summary={backtestSummary} />
-
-        {backtests.length > 0 && (
-          <ul className="mt-4 space-y-1 border-t border-line pt-3 text-sm">
-            {backtests.map((b) => (
-              <li key={b.id} className="flex justify-between gap-4">
-                <span className="text-muted">
-                  {fmtDate(b.asOfDate)} {b.ticker.symbol}
+        <h2 className="text-base font-semibold">Recent calls</h2>
+        <ul className="mt-2 divide-y divide-line rounded-xl bg-white ring-1 ring-line">
+          {signals.slice(0, RECENT_SHOWN).map((s) => {
+            const v = verdictFor(s.direction);
+            const o = outcomeInWords(s.outcome);
+            return (
+              <li key={s.id} className="grid grid-cols-[5.5rem_3.5rem_1fr] items-center gap-2 px-4 py-2.5 text-[15px] sm:grid-cols-[6rem_4rem_6rem_1fr]">
+                <span className="whitespace-nowrap text-muted">{fmtDay(s.createdAt)}</span>
+                <a href={`/tickers/${s.ticker.symbol}`} className="font-medium hover:underline">
+                  {s.ticker.symbol}
+                </a>
+                <span className={`hidden sm:block ${v.tone}`}>
+                  {v.symbol} {s.direction === "neutral" ? "No call" : s.direction === "bullish" ? "Up" : "Down"}
                 </span>
-                <span className={directionColor(b.direction)}>
-                  {b.direction}
-                  <span className={`ml-2 ${outcomeTone(b.outcome)}`}>
-                    {OUTCOME_LABELS[b.outcome] ?? b.outcome}
-                  </span>
+                <span className={`text-right ${o.tone}`}>
+                  {o.mark} {o.text}
                 </span>
               </li>
-            ))}
-          </ul>
-        )}
+            );
+          })}
+        </ul>
       </section>
 
-      <p className="mt-8 text-xs text-muted">
-        Past results say very little about future ones, especially at this sample size. Not financial
-        advice — you are solely responsible for your own trading decisions.
-      </p>
+      <details className="mt-8 rounded-xl bg-white p-5 ring-1 ring-line">
+        <summary className="cursor-pointer text-[15px] font-medium">About these numbers</summary>
+        <div className="mt-3 space-y-3 text-[15px] leading-relaxed">
+          <p>
+            A call counts as <span className="text-bullish">went as expected</span> if the price reached the level it
+            pointed to before reaching the level that would prove it wrong, within a week. Calls where neither happened
+            are left out of the score, because a small drift says little either way.
+          </p>
+          {summary.targetStopEvaluated > summary.distinctResolutionDays && (
+            <p>
+              The real evidence is thinner than the counts suggest: those {summary.targetStopEvaluated} results were
+              settled on only {summary.distinctResolutionDays} different market days. When one big market move settles
+              several calls at once, that is closer to one test than several.
+            </p>
+          )}
+          <p>
+            For comparison: when this was last checked (21 Nov 2026), simply guessing &ldquo;up&rdquo; every time
+            would have done better than these calls over the same period. Until they clearly beat simple guesses like
+            that, treat them as an opinion to weigh, not a prediction.
+          </p>
+          {btRight + btWrong > 0 && (
+            <p className="text-muted">
+              Separately, calls were also re-created for past dates the system missed, and checked against what
+              happened next: {btRight} of {btRight + btWrong} went as expected. These were never shown to anyone at the
+              time, so they are kept out of the numbers above.
+            </p>
+          )}
+        </div>
+      </details>
     </main>
+  );
+}
+
+function Stat({ value, label, tone }: { value: number; label: string; tone: string }) {
+  return (
+    <div className="rounded-xl bg-white p-4 ring-1 ring-line">
+      <div className={`text-2xl font-semibold ${tone}`}>{value}</div>
+      <div className="mt-0.5 text-sm leading-snug text-muted">{label}</div>
+    </div>
   );
 }
