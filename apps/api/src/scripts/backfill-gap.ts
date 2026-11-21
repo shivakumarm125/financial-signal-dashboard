@@ -19,8 +19,9 @@ import { getBacktestHitRateSummary } from "../analysis/signalOutcomes";
  *   npm run backfill:gap -- [--from 2026-09-16] [--to 2026-11-12] [--every 7]
  *                           [--symbols AAPL,AMD] [--max-cost 0.50] [--confirm]
  *
- * Defaults: from the day after the last live signal, to the last date whose
- * full 7-day horizon has known prices, one point per ticker every 7 days --
+ * Defaults: the most recent stretch of more than a week with no live signals,
+ * capped at the last date whose full 7-day horizon has known prices, one
+ * point per ticker every 7 days --
  * daily points would mostly re-read the same filings and news, so they cost
  * more without being independent evidence (see B9).
  */
@@ -40,6 +41,28 @@ function addDays(d: Date, n: number): Date {
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
+// Longer than any normal pause (weekends, the Mon/Wed/Fri schedule), so only
+// a real outage counts as a gap.
+const MIN_GAP_DAYS = 7;
+
+/**
+ * The most recent stretch with no live signals for longer than MIN_GAP_DAYS --
+ * found from the data rather than "since the last signal", because once the
+ * pipeline recovers the last signal is recent and the outage lies behind it.
+ * With no such gap, falls back to everything after the last signal.
+ */
+async function findLatestGap(latestBarDate: Date): Promise<{ from: Date; to: Date }> {
+  const signals = await prisma.signalRecord.findMany({ orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  const days = [...new Set(signals.map((s) => day(s.createdAt)))].map((d) => new Date(`${d}T00:00:00Z`));
+  for (let i = 0; i + 1 < days.length; i++) {
+    const [newer, older] = [days[i], days[i + 1]];
+    if ((newer.getTime() - older.getTime()) / 86_400_000 > MIN_GAP_DAYS) {
+      return { from: addDays(older, 1), to: addDays(newer, -1) };
+    }
+  }
+  return { from: days.length ? addDays(days[0], 1) : latestBarDate, to: latestBarDate };
+}
+
 async function main() {
   const confirm = process.argv.includes("--confirm");
   const every = Number(arg("every") ?? 7);
@@ -49,12 +72,15 @@ async function main() {
     ? arg("symbols")!.split(",").map((s) => s.trim().toUpperCase())
     : (await prisma.ticker.findMany({ select: { symbol: true }, orderBy: { symbol: "asc" } })).map((t) => t.symbol);
 
-  const lastSignal = await prisma.signalRecord.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } });
   const latestBar = await prisma.priceBar.findFirst({ orderBy: { date: "desc" }, select: { date: true } });
   if (!latestBar) throw new Error("No price data at all -- nothing to backfill against.");
 
-  const from = arg("from") ? new Date(`${arg("from")}T00:00:00Z`) : addDays(new Date(day(lastSignal?.createdAt ?? latestBar.date)), 1);
-  const to = arg("to") ? new Date(`${arg("to")}T00:00:00Z`) : addDays(latestBar.date, -HORIZON_DAYS);
+  const gap = await findLatestGap(latestBar.date);
+  const from = arg("from") ? new Date(`${arg("from")}T00:00:00Z`) : gap.from;
+  let to = arg("to") ? new Date(`${arg("to")}T00:00:00Z`) : gap.to;
+  // A point is only gradeable once its whole 7-day horizon has known prices.
+  const lastGradeable = addDays(latestBar.date, -HORIZON_DAYS);
+  if (to > lastGradeable) to = lastGradeable;
 
   const dates: Date[] = [];
   for (let d = from; d <= to; d = addDays(d, every)) dates.push(d);
