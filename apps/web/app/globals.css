@@ -3,7 +3,34 @@
 @tailwind utilities;
 
 body {
-  background: #fafafa;
-  color: #1a1a1a;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: #f2f4ef;
+  color: #17302a;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  /* No tabular figures: in this font they give periods and commas full
+     figure width too, so "$63.80" renders as "$63 . 80". */
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid #17302a;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary .chevron {
+  transition: transform 150ms ease;
+}
+details[open] > summary .chevron {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  details > summary .chevron {
+    transition: none;
+  }
 }

@@ -1,7 +1,16 @@
 import { prisma } from "@financial-adviser/shared";
 import { PipelineStatus } from "./components/PipelineStatus";
+import { PriceTrack } from "./components/PriceTrack";
 import { loadMarketFacts, loadReliability } from "./lib/marketFacts";
-import { verdictFor, factsInWords, fmtDay, fmtPrice, reliabilityInWords, weekChangeInWords } from "./lib/plain";
+import {
+  verdictFor,
+  factsInWords,
+  fmtDay,
+  fmtPrice,
+  reliabilityInWords,
+  weekChangeInWords,
+  weekHeadline,
+} from "./lib/plain";
 
 export const dynamic = "force-dynamic";
 
@@ -17,76 +26,87 @@ export default async function HomePage() {
   const facts = await loadMarketFacts(tickers.map((t) => t.id));
   const reliability = await loadReliability();
 
+  const rows = tickers.map((t) => {
+    const latest = t.signalRecords[0];
+    // A stock whose newest call predates the last update is one that update
+    // failed on -- without saying so, an old call looks current.
+    const stale = Boolean(latest && lastRun && latest.createdAt < lastRun.startedAt);
+    return { t, latest, stale, f: facts.get(t.id) };
+  });
+  const current = rows.filter((r) => r.latest && !r.stale).map((r) => r.latest!.direction);
+
   return (
     <main>
-      <PipelineStatus />
+      <h1 className="max-w-[16ch] text-[2.6rem] font-bold leading-[1.05] tracking-[-0.03em] sm:text-[3.25rem]">
+        {weekHeadline(current)}
+      </h1>
+      <div className="mt-4">
+        <PipelineStatus />
+      </div>
 
-      <section className="mb-6 rounded-lg bg-white px-4 py-3 text-sm leading-relaxed ring-1 ring-line">
-        <span className="font-medium">How reliable is this? </span>
+      <aside className="mt-6 max-w-[36rem] border-l-[3px] border-neutralSignal pl-4 text-[15px] leading-relaxed">
         {reliabilityInWords(reliability.right, reliability.wrong)} Treat each call as one opinion, not advice.
-      </section>
+      </aside>
 
-      {tickers.length === 0 ? (
-        <p className="text-muted">No stocks added yet.</p>
+      {rows.length === 0 ? (
+        <p className="mt-10 text-muted">No stocks added yet. Add one from Manage to get its first call.</p>
       ) : (
-        <ul className="space-y-3">
-          {tickers.map((t) => {
-            const latest = t.signalRecords[0];
-            const f = facts.get(t.id);
-            // A stock whose newest call predates the last update is one that
-            // update failed on -- without saying so, an old call looks current.
-            const stale = Boolean(latest && lastRun && latest.createdAt < lastRun.startedAt);
+        <ul className="mt-10 divide-y divide-line overflow-hidden rounded-2xl bg-white shadow-[0_1px_0_#D9E0DA]">
+          {rows.map(({ t, latest, stale, f }) => {
             const verdict = latest ? verdictFor(latest.direction) : null;
             const week = weekChangeInWords(f?.weekChangePct ?? null);
             const why = f ? factsInWords(f).slice(0, 2) : [];
 
             return (
               <li key={t.id}>
-                <a
-                  href={`/tickers/${t.symbol}`}
-                  className="block rounded-xl bg-white p-5 ring-1 ring-line transition hover:ring-ink/30"
-                >
-                  <div className="flex items-start justify-between gap-4">
+                <a href={`/tickers/${t.symbol}`} className="block px-5 py-6 transition-colors hover:bg-mist/60 sm:px-7">
+                  <div className="flex items-baseline justify-between gap-4">
                     <div className="min-w-0">
-                      <div className="text-lg font-semibold">{t.symbol}</div>
-                      <div className="truncate text-sm text-muted">{t.name ?? ""}</div>
+                      <span className="text-xl font-bold tracking-[-0.01em]">{t.symbol}</span>
+                      <span className="ml-2 truncate text-[15px] text-muted">{t.name ?? ""}</span>
                     </div>
                     {f?.price != null && (
-                      <div className="text-right">
-                        <div className="text-lg font-medium">{fmtPrice(f.price)}</div>
-                        {week && <div className={`text-sm ${week.tone}`}>{week.text}</div>}
+                      <div className="shrink-0 text-right">
+                        <span className="text-lg font-semibold">{fmtPrice(f.price)}</span>
+                        {week && <span className={`ml-2 text-sm ${week.tone}`}>{week.text}</span>}
                       </div>
                     )}
                   </div>
 
                   {verdict ? (
-                    <div
-                      className={`mt-4 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[15px] font-medium ${
-                        stale ? "bg-line text-muted" : `${verdict.bg} ${verdict.tone}`
-                      }`}
-                    >
-                      <span aria-hidden>{verdict.symbol}</span>
+                    <p className={`mt-3 text-[1.35rem] font-semibold leading-tight ${stale ? "text-muted" : verdict.tone}`}>
+                      <span aria-hidden className="mr-1.5 text-base align-middle">
+                        {verdict.symbol}
+                      </span>
                       {verdict.label}
-                    </div>
+                    </p>
                   ) : (
-                    <p className="mt-4 text-sm text-muted">No call yet.</p>
+                    <p className="mt-3 text-muted">No call yet.</p>
                   )}
 
                   {stale && latest && (
-                    <p className="mt-2 text-sm text-muted">
-                      This call is from {fmtDay(latest.createdAt)} — the latest update missed this stock.
+                    <p className="mt-1 text-sm text-muted">
+                      This call is from {fmtDay(latest.createdAt)}. The latest update missed this stock.
                     </p>
                   )}
 
+                  {latest && !stale && (
+                    <PriceTrack
+                      direction={latest.direction}
+                      target={latest.targetPrice ? Number(latest.targetPrice) : null}
+                      stop={latest.stopLossPrice ? Number(latest.stopLossPrice) : null}
+                      entry={latest.entryPrice ? Number(latest.entryPrice) : null}
+                      current={f?.price ?? null}
+                    />
+                  )}
+
                   {why.length > 0 && (
-                    <ul className="mt-3 space-y-1 text-[15px] leading-snug text-ink/80">
+                    <ul className="mt-3 space-y-0.5 text-[15px] leading-snug text-muted">
                       {why.map((line) => (
                         <li key={line}>{line}</li>
                       ))}
                     </ul>
                   )}
-
-                  <p className="mt-3 text-sm text-muted">See why →</p>
                 </a>
               </li>
             );

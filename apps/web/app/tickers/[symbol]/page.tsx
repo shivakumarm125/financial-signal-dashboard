@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@financial-adviser/shared";
+import { PriceTrack } from "../../components/PriceTrack";
 import { loadMarketFacts, loadReliability } from "../../lib/marketFacts";
 import {
   verdictFor,
@@ -31,7 +32,8 @@ export default async function StockPage({ params }: { params: { symbol: string }
     include: { citations: true },
   });
   const pastCalls = await prisma.signalRecord.findMany({
-    where: { tickerId: ticker.id, ...(latest ? { id: { not: latest.id } } : {}) },
+    // Only real calls: "no call" days would fill the list with rows that say nothing.
+    where: { tickerId: ticker.id, direction: { not: "neutral" }, ...(latest ? { id: { not: latest.id } } : {}) },
     orderBy: { createdAt: "desc" },
     take: PAST_CALLS_SHOWN,
   });
@@ -47,137 +49,146 @@ export default async function StockPage({ params }: { params: { symbol: string }
   const citedNews = newsIds.length ? await prisma.newsArticle.findMany({ where: { id: { in: newsIds } } }) : [];
 
   const verdict = latest ? verdictFor(latest.direction) : null;
-  const levels = latest
-    ? levelsInWords(
-        latest.direction,
-        latest.targetPrice ? Number(latest.targetPrice) : null,
-        latest.stopLossPrice ? Number(latest.stopLossPrice) : null,
-        latest.createdAt
-      )
-    : null;
+  const target = latest?.targetPrice ? Number(latest.targetPrice) : null;
+  const stop = latest?.stopLossPrice ? Number(latest.stopLossPrice) : null;
+  const levels = latest ? levelsInWords(latest.direction, target, stop, latest.createdAt) : null;
   const week = weekChangeInWords(facts.weekChangePct);
   const seeing = factsInWords(facts);
 
   return (
     <main>
-      <p className="mb-6">
-        <a href="/" className="text-sm text-muted hover:text-ink">
-          ← My stocks
-        </a>
-      </p>
+      <a href="/" className="text-[15px] text-muted hover:text-ink">
+        Back to my stocks
+      </a>
 
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold">{ticker.name ?? ticker.symbol}</h1>
-          <p className="text-muted">{ticker.symbol}</p>
-        </div>
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <p className="text-lg">
+          <span className="font-bold">{ticker.symbol}</span>
+          <span className="ml-2 text-muted">{ticker.name}</span>
+        </p>
         {facts.price !== null && (
-          <div className="text-right">
-            <div className="text-2xl font-medium">{fmtPrice(facts.price)}</div>
-            {week && <div className={`text-sm ${week.tone}`}>{week.text}</div>}
-          </div>
+          <p>
+            <span className="text-lg font-semibold">{fmtPrice(facts.price)}</span>
+            {week && <span className={`ml-2 text-sm ${week.tone}`}>{week.text}</span>}
+          </p>
         )}
       </div>
 
       {latest && verdict ? (
-        <section className="mt-6 rounded-xl bg-white p-5 ring-1 ring-line">
-          <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-lg font-medium ${verdict.bg} ${verdict.tone}`}>
-            <span aria-hidden>{verdict.symbol}</span>
-            {verdict.label}
-          </div>
-          <p className="mt-2 text-sm text-muted">
-            {surenessFor(latest.confidence)} · call made {fmtDay(latest.createdAt)}, for the week to{" "}
-            {fmtDay(addDays(latest.createdAt, HORIZON_DAYS))}
+        <section className="mt-4">
+          <h1 className={`text-[2.6rem] font-bold leading-[1.05] tracking-[-0.03em] sm:text-[3.25rem] ${verdict.tone}`}>
+            {verdict.label}.
+          </h1>
+          <p className="mt-3 text-[15px] text-muted">
+            {surenessFor(latest.confidence)}. Call made {fmtDay(latest.createdAt)} for the week to{" "}
+            {fmtDay(addDays(latest.createdAt, HORIZON_DAYS))}.
           </p>
 
-          {levels && (
-            <div className="mt-4 space-y-1 text-[15px] leading-relaxed">
-              <p>{levels.ifRight}</p>
-              <p>{levels.ifWrong}</p>
+          {levels ? (
+            <div className="mt-8 rounded-2xl bg-white px-5 pb-4 pt-5 sm:px-7">
+              <PriceTrack
+                direction={latest.direction}
+                target={target}
+                stop={stop}
+                entry={latest.entryPrice ? Number(latest.entryPrice) : null}
+                current={facts.price}
+                large
+              />
+              <div className="mt-3 space-y-1 border-t border-line pt-4 text-[15px] leading-relaxed">
+                <p>{levels.ifRight}</p>
+                <p className="text-muted">{levels.ifWrong}</p>
+              </div>
             </div>
-          )}
-          {latest.direction === "neutral" && (
-            <p className="mt-4 text-[15px] leading-relaxed">
-              Nothing points clearly up or down right now, so no call this week.
+          ) : (
+            <p className="mt-6 max-w-[36rem] text-lg leading-relaxed">
+              Nothing points clearly up or down right now, so there&apos;s no call this week.
             </p>
           )}
         </section>
       ) : (
-        <p className="mt-6 text-muted">No call yet for this stock.</p>
+        <h1 className="mt-4 text-[2.2rem] font-bold leading-tight tracking-[-0.02em] text-muted">No call yet.</h1>
       )}
 
       {seeing.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-base font-semibold">What we&apos;re seeing</h2>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-[15px] leading-relaxed">
+        <section className="mt-12">
+          <h2 className="text-xl font-bold tracking-[-0.01em]">What we&apos;re seeing</h2>
+          <ul className="mt-3 space-y-2 text-[1.05rem] leading-relaxed">
             {seeing.map((line) => (
-              <li key={line}>{line}</li>
+              <li key={line} className="flex gap-3">
+                <span aria-hidden className="mt-[0.6em] h-1.5 w-1.5 shrink-0 rounded-full bg-ink/40" />
+                {line}
+              </li>
             ))}
           </ul>
         </section>
       )}
 
       {latest && (
-        <details className="mt-6 rounded-xl bg-white p-5 ring-1 ring-line">
-          <summary className="cursor-pointer text-[15px] font-medium">Read the full reasoning</summary>
-          <p className="mt-3 text-[15px] leading-relaxed">{latest.rationale}</p>
-          {latest.entryGuidance && (
-            <>
-              <h3 className="mt-4 text-sm font-semibold">Notes for people who trade</h3>
-              <p className="mt-1 text-[15px] leading-relaxed">{latest.entryGuidance}</p>
-            </>
-          )}
+        <details className="mt-8 rounded-2xl bg-white px-5 py-4 sm:px-7">
+          <summary className="flex cursor-pointer items-center gap-2 text-[1.05rem] font-semibold">
+            <span aria-hidden className="chevron inline-block text-muted">
+              ›
+            </span>
+            Read the full reasoning
+          </summary>
+          <div className="mt-4 max-w-[38rem] font-serif text-[1.05rem] leading-[1.7]">
+            <p>{latest.rationale}</p>
+            {latest.entryGuidance && (
+              <>
+                <h3 className="mt-6 font-sans text-base font-semibold">Notes for people who trade</h3>
+                <p className="mt-1">{latest.entryGuidance}</p>
+              </>
+            )}
+          </div>
           {citedNews.length > 0 && (
             <>
-              <h3 className="mt-4 text-sm font-semibold">News it was based on</h3>
-              <ul className="mt-1 space-y-1 text-sm text-muted">
+              <h3 className="mt-6 text-base font-semibold">News it was based on</h3>
+              <ul className="mt-2 space-y-1.5 text-[15px] text-muted">
                 {citedNews.map((n) => (
                   <li key={n.id}>
-                    {n.source}: {n.headline}
+                    {n.headline} <span className="whitespace-nowrap">({n.source})</span>
                   </li>
                 ))}
               </ul>
             </>
           )}
-          <p className="mt-4 text-xs text-muted">Written by an AI model from prices, news, insider filings and forum posts.</p>
+          <p className="mt-6 text-sm text-muted">Written by an AI model from prices, news, insider filings and forum posts.</p>
         </details>
       )}
 
-      <section className="mt-8">
-        <h2 className="text-base font-semibold">How past calls on {ticker.symbol} turned out</h2>
-        <p className="mt-1 text-[15px] text-muted">{reliabilityInWords(reliability.right, reliability.wrong)}</p>
+      <section className="mt-12">
+        <h2 className="text-xl font-bold tracking-[-0.01em]">How past calls on {ticker.symbol} turned out</h2>
+        <p className="mt-1 max-w-[36rem] text-[15px] leading-relaxed text-muted">
+          {reliabilityInWords(reliability.right, reliability.wrong)}
+        </p>
         {pastCalls.length > 0 && (
-          <ul className="mt-3 divide-y divide-line rounded-xl bg-white ring-1 ring-line">
+          <ul className="mt-4 divide-y divide-line rounded-2xl bg-white">
             {pastCalls.map((s) => {
               const v = verdictFor(s.direction);
               const o = outcomeInWords(s.outcome);
               return (
-                <li key={s.id} className="flex items-center justify-between gap-4 px-4 py-2.5 text-[15px]">
-                  <span className="whitespace-nowrap text-muted">{fmtDay(s.createdAt)}</span>
-                  <span className={`flex-1 ${v.tone}`}>
-                    {v.symbol} {s.direction === "neutral" ? "No call" : s.direction === "bullish" ? "Up" : "Down"}
+                <li key={s.id} className="grid grid-cols-[5.5rem_4.5rem_1fr] items-baseline gap-3 px-5 py-3 text-[15px] sm:px-7">
+                  <span className="text-muted">{fmtDay(s.createdAt)}</span>
+                  <span className={`font-medium ${v.tone}`}>
+                    {s.direction === "neutral" ? "No call" : s.direction === "bullish" ? "Up" : "Down"}
                   </span>
-                  <span className={`text-right ${o.tone}`}>
-                    {o.mark} {o.text}
-                  </span>
+                  <span className={`text-right ${o.tone}`}>{o.text}</span>
                 </li>
               );
             })}
           </ul>
         )}
-        <p className="mt-2 text-sm">
-          <a href="/history" className="text-muted underline hover:text-ink">
-            See all past results
-          </a>
-        </p>
+        <a href="/history" className="mt-3 inline-block text-[15px] text-muted underline underline-offset-4 hover:text-ink">
+          See all past results
+        </a>
       </section>
 
       {news.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-base font-semibold">Latest news</h2>
-          <ul className="mt-2 space-y-3">
+        <section className="mt-12">
+          <h2 className="text-xl font-bold tracking-[-0.01em]">Latest news</h2>
+          <ul className="mt-4 space-y-4">
             {news.map((n) => (
-              <li key={n.id} className="text-[15px] leading-snug">
+              <li key={n.id} className="max-w-[38rem] text-[1.05rem] leading-snug">
                 {n.url ? (
                   <a href={n.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
                     {n.headline}
@@ -185,8 +196,8 @@ export default async function StockPage({ params }: { params: { symbol: string }
                 ) : (
                   n.headline
                 )}
-                <div className="text-sm text-muted">
-                  {n.source} · {fmtDay(n.publishedAt)}
+                <div className="mt-0.5 text-sm text-muted">
+                  {n.source}, {fmtDay(n.publishedAt)}
                 </div>
               </li>
             ))}

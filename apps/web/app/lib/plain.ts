@@ -6,9 +6,25 @@
 
 export const HORIZON_DAYS = 7;
 
-/** e.g. "Fri 20 Nov". Dates are stored as UTC calendar days. */
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** e.g. "Fri 20 Nov". Dates are stored as UTC calendar days; built by hand so server and locale can't change it. */
 export function fmtDay(d: Date): string {
-  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** The week at a glance, e.g. "4 of your 5 stocks are leaning down this week." */
+export function weekHeadline(directions: string[]): string {
+  const n = directions.length;
+  const up = directions.filter((d) => d === "bullish").length;
+  const down = directions.filter((d) => d === "bearish").length;
+  if (n === 0) return "No calls yet this week.";
+  const of = (k: number) => (k === n ? (n === 1 ? "Your stock is" : `All ${n} of your stocks are`) : `${k} of your ${n} stocks ${k === 1 ? "is" : "are"}`);
+  if (down > up) return `${of(down)} leaning down this week.`;
+  if (up > down) return `${of(up)} leaning up this week.`;
+  if (up === 0) return "No clear direction for any of your stocks this week.";
+  return "A mixed week: as many stocks leaning up as down.";
 }
 
 export function fmtPrice(n: number): string {

@@ -14,6 +14,14 @@ import { fmtDay } from "../lib/plain";
 
 // Runs Mon/Wed/Fri, so a weekend gap is ~72h; a bank holiday can stretch it.
 const STALE_AFTER_HOURS = 100;
+const RUN_DAYS = [1, 3, 5]; // Mon, Wed, Fri (UTC), matching the workflow cron
+
+function nextRunDay(from: Date): Date {
+  const d = new Date(from);
+  do d.setUTCDate(d.getUTCDate() + 1);
+  while (!RUN_DAYS.includes(d.getUTCDay()));
+  return d;
+}
 
 export async function PipelineStatus() {
   const lastRun = await prisma.pipelineRun.findFirst({
@@ -33,21 +41,21 @@ export async function PipelineStatus() {
 
   if (!stale && !failed) {
     return (
-      <p className="mb-5 text-sm text-muted">
-        Updated {fmtDay(lastGood!.finishedAt!)} · next update on the next Mon, Wed or Fri
+      <p className="text-[15px] text-muted">
+        Updated {fmtDay(lastGood!.finishedAt!)}. Next update {fmtDay(nextRunDay(new Date()))}.
       </p>
     );
   }
 
   return (
-    <div className="mb-5 rounded-lg border border-bearish/30 bg-bearish/5 px-4 py-3 text-sm leading-relaxed">
-      <span className="font-medium">These may be out of date.</span>{" "}
+    <p className="rounded-lg bg-bearish/10 px-4 py-3 text-[15px] leading-relaxed text-bearish">
+      <span className="font-semibold">These may be out of date. </span>
       {lastGood ? (
         <>The last successful update was {fmtDay(lastGood.finishedAt!)}</>
       ) : (
         <>There hasn&apos;t been a successful update yet</>
       )}
-      {failed ? " — the most recent update didn't work." : "."}
-    </div>
+      {failed ? ", and the most recent one didn't work." : "."}
+    </p>
   );
 }

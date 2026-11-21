@@ -16,6 +16,7 @@ export default async function PastResultsPage() {
   const wrong = count("hit_stop");
   const unclear = signals.filter((s) => s.outcome !== null && s.outcome !== "hit_target" && s.outcome !== "hit_stop").length;
   const waiting = signals.filter((s) => s.outcome === null).length;
+  const total = signals.length || 1;
 
   const bySymbol = new Map<string, { right: number; wrong: number }>();
   for (const s of signals) {
@@ -29,64 +30,106 @@ export default async function PastResultsPage() {
   const btRight = backtest.counts.hit_target ?? 0;
   const btWrong = backtest.counts.hit_stop ?? 0;
 
+  // Every call this system has made, as one bar: what happened to each.
+  const parts = [
+    { n: right, label: "went as expected", bar: "bg-bullish", dot: "bg-bullish" },
+    { n: wrong, label: "went the other way", bar: "bg-bearish", dot: "bg-bearish" },
+    { n: unclear, label: "no call, or no clear result", bar: "bg-line", dot: "bg-line" },
+    { n: waiting, label: "still waiting to see", bar: "bg-white ring-1 ring-inset ring-line", dot: "bg-white ring-1 ring-line" },
+  ];
+
   return (
     <main>
-      <h1 className="text-2xl font-semibold">Past results</h1>
-      <p className="mt-1 text-[15px] text-muted">
-        Each call is checked a week later against what the price actually did.
-      </p>
+      <h1 className="max-w-[18ch] text-[2.6rem] font-bold leading-[1.05] tracking-[-0.03em] sm:text-[3.25rem]">
+        <span className="text-bullish">{right} calls went as expected.</span>{" "}
+        <span className="text-bearish">{wrong} went the other way.</span>
+      </h1>
+      <p className="mt-4 max-w-[36rem] text-[1.05rem] leading-relaxed">{reliabilityInWords(right, wrong)}</p>
 
-      <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat value={right} label="Went as expected" tone="text-bullish" />
-        <Stat value={wrong} label="Went the other way" tone="text-bearish" />
-        <Stat value={unclear} label="No call, or no clear result" tone="text-muted" />
-        <Stat value={waiting} label="Still waiting to see" tone="text-muted" />
-      </section>
-      <p className="mt-4 text-[15px] leading-relaxed">{reliabilityInWords(right, wrong)}</p>
-
-      <section className="mt-8">
-        <h2 className="text-base font-semibold">By stock</h2>
-        <ul className="mt-2 divide-y divide-line rounded-xl bg-white ring-1 ring-line">
-          {perStock.map(([symbol, r]) => (
-            <li key={symbol}>
-              <a href={`/tickers/${symbol}`} className="flex items-center justify-between px-4 py-2.5 text-[15px] hover:bg-paper">
-                <span className="font-medium">{symbol}</span>
-                <span className="text-muted">
-                  {r.right + r.wrong === 0 ? "nothing checked yet" : `${r.right} of ${r.right + r.wrong} went as expected`}
-                </span>
-              </a>
+      <section className="mt-10" aria-label="What happened to every call">
+        <div className="flex h-4 overflow-hidden rounded-full bg-white">
+          {parts.map((p) =>
+            p.n > 0 ? <div key={p.label} className={p.bar} style={{ width: `${(p.n / total) * 100}%` }} /> : null
+          )}
+        </div>
+        <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[15px]">
+          {parts.map((p) => (
+            <li key={p.label} className="flex items-center gap-2">
+              <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${p.dot}`} />
+              <span>
+                <span className="font-semibold">{p.n}</span> <span className="text-muted">{p.label}</span>
+              </span>
             </li>
           ))}
         </ul>
+        <p className="mt-3 text-[15px] text-muted">Each call is checked a week later against what the price actually did.</p>
       </section>
 
-      <section className="mt-8">
-        <h2 className="text-base font-semibold">Recent calls</h2>
-        <ul className="mt-2 divide-y divide-line rounded-xl bg-white ring-1 ring-line">
-          {signals.slice(0, RECENT_SHOWN).map((s) => {
-            const v = verdictFor(s.direction);
-            const o = outcomeInWords(s.outcome);
+      <section className="mt-12">
+        <h2 className="text-xl font-bold tracking-[-0.01em]">By stock</h2>
+        <ul className="mt-4 divide-y divide-line rounded-2xl bg-white">
+          {perStock.map(([symbol, r]) => {
+            const n = r.right + r.wrong;
             return (
-              <li key={s.id} className="grid grid-cols-[5.5rem_3.5rem_1fr] items-center gap-2 px-4 py-2.5 text-[15px] sm:grid-cols-[6rem_4rem_6rem_1fr]">
-                <span className="whitespace-nowrap text-muted">{fmtDay(s.createdAt)}</span>
-                <a href={`/tickers/${s.ticker.symbol}`} className="font-medium hover:underline">
-                  {s.ticker.symbol}
+              <li key={symbol}>
+                <a
+                  href={`/tickers/${symbol}`}
+                  className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-4 px-5 py-3.5 text-[15px] hover:bg-mist/60 sm:px-7"
+                >
+                  <span className="font-bold">{symbol}</span>
+                  <span className="flex h-2 overflow-hidden rounded-full bg-line">
+                    {n > 0 && (
+                      <>
+                        <span className="bg-bullish" style={{ width: `${(r.right / n) * 100}%` }} />
+                        <span className="bg-bearish" style={{ width: `${(r.wrong / n) * 100}%` }} />
+                      </>
+                    )}
+                  </span>
+                  <span className="text-muted">{n === 0 ? "none checked yet" : `${r.right} of ${n} as expected`}</span>
                 </a>
-                <span className={`hidden sm:block ${v.tone}`}>
-                  {v.symbol} {s.direction === "neutral" ? "No call" : s.direction === "bullish" ? "Up" : "Down"}
-                </span>
-                <span className={`text-right ${o.tone}`}>
-                  {o.mark} {o.text}
-                </span>
               </li>
             );
           })}
         </ul>
       </section>
 
-      <details className="mt-8 rounded-xl bg-white p-5 ring-1 ring-line">
-        <summary className="cursor-pointer text-[15px] font-medium">About these numbers</summary>
-        <div className="mt-3 space-y-3 text-[15px] leading-relaxed">
+      <section className="mt-12">
+        <h2 className="text-xl font-bold tracking-[-0.01em]">Recent calls</h2>
+        <p className="mt-1 text-[15px] text-muted">Up and down calls only. Days with no clear direction are left out.</p>
+        <ul className="mt-4 divide-y divide-line rounded-2xl bg-white">
+          {signals
+            .filter((s) => s.direction !== "neutral")
+            .slice(0, RECENT_SHOWN)
+            .map((s) => {
+            const v = verdictFor(s.direction);
+            const o = outcomeInWords(s.outcome);
+            return (
+              <li
+                key={s.id}
+                className="grid grid-cols-[5.5rem_3.5rem_1fr] items-baseline gap-3 px-5 py-3 text-[15px] sm:grid-cols-[5.5rem_4rem_4.5rem_1fr] sm:px-7"
+              >
+                <span className="text-muted">{fmtDay(s.createdAt)}</span>
+                <a href={`/tickers/${s.ticker.symbol}`} className="font-bold hover:underline">
+                  {s.ticker.symbol}
+                </a>
+                <span className={`hidden font-medium sm:block ${v.tone}`}>
+                  {s.direction === "neutral" ? "No call" : s.direction === "bullish" ? "Up" : "Down"}
+                </span>
+                <span className={`text-right ${o.tone}`}>{o.text}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <details className="mt-8 rounded-2xl bg-white px-5 py-4 sm:px-7">
+        <summary className="flex cursor-pointer items-center gap-2 text-[1.05rem] font-semibold">
+          <span aria-hidden className="chevron inline-block text-muted">
+            ›
+          </span>
+          About these numbers
+        </summary>
+        <div className="mt-4 max-w-[38rem] space-y-3 text-[15px] leading-relaxed">
           <p>
             A call counts as <span className="text-bullish">went as expected</span> if the price reached the level it
             pointed to before reaching the level that would prove it wrong, within a week. Calls where neither happened
@@ -114,14 +157,5 @@ export default async function PastResultsPage() {
         </div>
       </details>
     </main>
-  );
-}
-
-function Stat({ value, label, tone }: { value: number; label: string; tone: string }) {
-  return (
-    <div className="rounded-xl bg-white p-4 ring-1 ring-line">
-      <div className={`text-2xl font-semibold ${tone}`}>{value}</div>
-      <div className="mt-0.5 text-sm leading-snug text-muted">{label}</div>
-    </div>
   );
 }
